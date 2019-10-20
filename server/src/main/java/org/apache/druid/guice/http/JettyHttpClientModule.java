@@ -81,7 +81,7 @@ public class JettyHttpClientModule implements Module
       final HttpClient httpClient;
       final Binding<SSLContext> sslContextBinding = getSslContextBinding();
       if (sslContextBinding != null) {
-        final SslContextFactory.Client sslContextFactory = new SslContextFactory.Client();
+        final SslContextFactory sslContextFactory = new SslContextFactory();
         sslContextFactory.setSslContext(sslContextBinding.getProvider().get());
         httpClient = new HttpClient(sslContextFactory);
       } else {

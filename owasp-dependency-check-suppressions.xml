@@ -252,40 +252,38 @@
     <cve>CVE-2019-17571</cve>
   </suppress>
   <suppress>
-     <!--
-       - TODO: The lastest version of ambari-metrics-common is 2.7.0.0.0, released in July 2018.
-       -->
-     <notes><![CDATA[
-     file name: ambari-metrics-common-2.7.0.0.0.jar (shaded: io.netty:netty:3.10.5.Final)
-     ]]></notes>
-     <packageUrl regex="true">^pkg:maven/io\.netty/netty@3.10.5.Final$</packageUrl>
-     <cve>CVE-2019-16869</cve>
-     <cve>CVE-2019-20444</cve>
-     <cve>CVE-2019-20445</cve>
+    <notes><![CDATA[
+         file name: jetty-*-9.3.27.v20190418.jar
+         ]]></notes>
+    <packageUrl regex="true">^pkg:maven/org\.eclipse\.jetty/jetty\-.*@9.3.27.v20190418$</packageUrl>
+    <cvssBelow>10</cvssBelow>
+    <cve>CVE-2017-9735</cve>
   </suppress>
   <suppress>
-       <!--
-         - TODO: The lastest version of ambari-metrics-common is 2.7.0.0.0, released in July 2018.
-         -->
-     <notes><![CDATA[
-     file name: ambari-metrics-common-2.7.0.0.0.jar (shaded: org.apache.hadoop:hadoop-annotations:2.6.0)
-     ]]></notes>
-     <packageUrl regex="true">^pkg:maven/org\.apache\.hadoop/hadoop\-annotations@.*$</packageUrl>
-     <cve>CVE-2015-1776</cve>
-     <cve>CVE-2016-3086</cve>
-     <cve>CVE-2016-5393</cve>
-     <cve>CVE-2016-6811</cve>
-     <cve>CVE-2017-3162</cve>
-     <cve>CVE-2018-11768</cve>
-     <cve>CVE-2018-1296</cve>
-     <cve>CVE-2018-8009</cve>
-     <cve>CVE-2018-8029</cve>
+    <notes><![CDATA[
+         file name: aws-java-sdk-bundle-1.11.271.jar
+
+         from druid-hdfs-storage
+         ]]></notes>
+    <packageUrl regex="true">^pkg:maven/com\.amazonaws/aws\-java\-sdk\-.*@1.11.271$</packageUrl>
+    <cvssBelow>10</cvssBelow>
   </suppress>
   <suppress>
-     <notes><![CDATA[
-     file name: hadoop-*-2.8.5.jar
-     ]]></notes>
-     <packageUrl regex="true">^pkg:maven/org\.apache\.hadoop/hadoop\-.*@.*$</packageUrl>
-     <cve>CVE-2018-11765</cve>
+    <notes><![CDATA[
+         file name: aws-java-sdk-bundle-1.11.271.jar
+
+         from druid-hdfs-storage
+         ]]></notes>
+    <packageUrl regex="true">^pkg:maven/com\.fasterxml\.jackson\.core/jackson\-databind@2.6.7.1$</packageUrl>
+    <cvssBelow>10</cvssBelow>
+  </suppress>
+  <suppress>
+    <notes><![CDATA[
+         file name: log4j-1.2.17.jar
+
+         from druid-orc-extensions i guess...
+         ]]></notes>
+    <packageUrl regex="true">^pkg:maven/log4j/log4j@1.2.17$</packageUrl>
+    <cvssBelow>10</cvssBelow>
   </suppress>
 </suppressions>

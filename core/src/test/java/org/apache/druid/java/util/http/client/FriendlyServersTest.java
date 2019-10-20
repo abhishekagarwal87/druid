@@ -186,7 +186,7 @@ public class FriendlyServersTest
     HttpConfiguration https = new HttpConfiguration();
     https.addCustomizer(new SecureRequestCustomizer());
 
-    SslContextFactory.Server sslContextFactory = new SslContextFactory.Server();
+    SslContextFactory sslContextFactory = new SslContextFactory();
     sslContextFactory.setKeyStorePath(keyStorePath);
     sslContextFactory.setKeyStorePassword("abc123");
     sslContextFactory.setKeyManagerPassword("abc123");

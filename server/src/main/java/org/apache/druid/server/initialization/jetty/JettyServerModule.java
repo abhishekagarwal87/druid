@@ -169,7 +169,7 @@ public class JettyServerModule extends JerseyServletModule
         node,
         config,
         TLSServerConfig,
-        injector.getExistingBinding(Key.get(SslContextFactory.Server.class)),
+        injector.getExistingBinding(Key.get(SslContextFactory.class)),
         injector.getInstance(TLSCertificateChecker.class)
     );
   }
@@ -198,7 +198,7 @@ public class JettyServerModule extends JerseyServletModule
       DruidNode node,
       ServerConfig config,
       TLSServerConfig tlsServerConfig,
-      Binding<SslContextFactory.Server> sslContextFactoryBinding,
+      Binding<SslContextFactory> sslContextFactoryBinding,
       TLSCertificateChecker certificateChecker
   )
   {
@@ -247,7 +247,7 @@ public class JettyServerModule extends JerseyServletModule
       serverConnectors.add(connector);
     }
 
-    final SslContextFactory.Server sslContextFactory;
+    final SslContextFactory sslContextFactory;
 
     if (node.isEnableTlsPort()) {
       log.info("Creating https connector with port [%d]", node.getTlsPort());
@@ -502,7 +502,7 @@ public class JettyServerModule extends JerseyServletModule
     }
   }
 
-  private static class IdentityCheckOverrideSslContextFactory extends SslContextFactory.Server
+  private static class IdentityCheckOverrideSslContextFactory extends SslContextFactory
   {
     private final TLSServerConfig tlsServerConfig;
     private final TLSCertificateChecker certificateChecker;
