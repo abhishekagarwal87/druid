@@ -95,7 +95,7 @@ public class IntervalDimFilterTest
         ),
         null
     );
-    Assert.assertNotEquals(intervalFilter1.getCacheKey(), intervalFilter2.getCacheKey());
+    Assert.assertFalse(Arrays.equals(intervalFilter1.getCacheKey(), intervalFilter2.getCacheKey()));
 
     RegexDimExtractionFn regexFn = new RegexDimExtractionFn(".*", false, null);
     DimFilter intervalFilter3 = new IntervalDimFilter(
@@ -114,7 +114,7 @@ public class IntervalDimFilterTest
         ),
         regexFn
     );
-    Assert.assertNotEquals(intervalFilter3.getCacheKey(), intervalFilter4.getCacheKey());
+    Assert.assertFalse(Arrays.equals(intervalFilter3.getCacheKey(), intervalFilter4.getCacheKey()));
   }
 
   @Test

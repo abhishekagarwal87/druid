@@ -396,6 +396,11 @@
         <constraint name="a" nameOfExprType="java\.util\.regex\.Pattern" within="" contains="" />
         <constraint name="b" minCount="0" maxCount="2147483647" within="" contains="" />
       </searchConfiguration>
+      <searchConfiguration name="'assertNotEquals()' called on array type" uuid="cb5d8da3-425b-3984-8a8d-a16dbf12217c" description="Reports any calls to JUnit's assertNotEquals() method with arguments of type array. Arrays should be checked using assertFalse(Arrays.equals()) method chain. " suppressId="AssertNotEqualsCalledOnArray" text="Assert.assertNotEquals($expected$, $actual$)" recursive="false" caseInsensitive="true" type="JAVA" pattern_context="default">
+        <constraint name="__context__" script="&quot;import com.intellij.psi.PsiArrayType;&#10;import com.intellij.psi.PsiClass;&#10;import com.intellij.psi.PsiType;&#10;import com.siyeh.ig.testFrameworks.AssertHint;&#10;import java.util.Objects;&#10;&#10;AssertHint assertHint = AssertHint.createAssertNotEqualsHint(__context__)&#10;if (assertHint == null)&#10;{&#10;    false;&#10;}&#10;PsiClass containingClass = Objects.requireNonNull(Objects.requireNonNull(__context__.resolveMethod()).getContainingClass());&#10;if (!Objects.requireNonNull(containingClass.getQualifiedName()).contains(&quot;junit&quot;)) {&#10;    return;&#10;}&#10;&#10;final PsiType type1 = assertHint.getFirstArgument().getType();&#10;final PsiType type2 = assertHint.getSecondArgument().getType();&#10;(type1 instanceof com.intellij.psi.PsiArrayType) &amp;&amp; (type2 instanceof com.intellij.psi.PsiArrayType)&quot;" within="" contains="" />
+        <constraint name="expected" within="" contains="" />
+        <constraint name="actual" within="" contains="" />
+      </searchConfiguration>
     </inspection_tool>
     <inspection_tool class="SimplifyStreamApiCallChains" enabled="true" level="ERROR" enabled_by_default="true" />
     <inspection_tool class="SpellCheckingInspection" enabled="false" level="TYPO" enabled_by_default="false">
@@ -470,8 +475,9 @@
     <inspection_tool class="XmlHighlighting" enabled="true" level="Non-TeamCity Warning" enabled_by_default="true" />
     <inspection_tool class="XmlInvalidId" enabled="true" level="Non-TeamCity Error" enabled_by_default="true" />
     <inspection_tool class="XmlPathReference" enabled="true" level="Non-TeamCity Error" enabled_by_default="true" />
-    <inspection_tool class="unused" enabled="true" level="WARNING" enabled_by_default="true" isSelected="false">
-      <scope name="UnusedInspectionsScope" level="ERROR" enabled="true" isSelected="false">
+    <inspection_tool class="cb5d8da3-425b-3984-8a8d-a16dbf12217c" enabled="true" level="ERROR" enabled_by_default="true" />
+    <inspection_tool class="unused" enabled="true" level="WARNING" enabled_by_default="true" isSelected="true">
+      <scope name="UnusedInspectionsScope" level="ERROR" enabled="true" isSelected="true">
         <option name="LOCAL_VARIABLE" value="true" />
         <option name="FIELD" value="true" />
         <option name="METHOD" value="true" />
