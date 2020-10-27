@@ -1,0 +1,484 @@
+def MVN               = "mvn -B"
+def MVN_OPTS          = "export MAVEN_OPTS=\"-Xms4g -Xmx8g -XX:MaxDirectMemorySize=2048m\""
+def MAVEN_SKIP        = "-Danimal.sniffer.skip=true -Dcheckstyle.skip=true -Ddruid.console.skip=true -Denforcer.skip=true -Dforbiddenapis.skip=true -Dmaven.javadoc.skip=true -Dpmd.skip=true -Dspotbugs.skip=true"
+def MAVEN_SKIP_TESTS  = "-DskipTests -Djacoco.skip=true"
+def M2_CACHE_IMAGE    = "018895040333.dkr.ecr.us-east-1.amazonaws.com/druid-m2-cache"
+def BUILD_CACHE_IMAGE = "018895040333.dkr.ecr.us-east-1.amazonaws.com/druid-build-cache"
+def AWS_CREDS_ID      = "aws_s3_access"
+def AZURE_CREDS_ID    = "azure_credentials"
+def GCS_CREDS_ID      = "gcs-bucket-qa"
+def BUILD_CACHE_TAG   = env.BUILD_TAG.toLowerCase().replaceAll(~/[^a-z0-9-]/,'')
+
+def dockerInitCleanup = {
+    sh script: "for container in \$(docker ps -q); do docker stop \$container; done"
+    sh script: "docker container prune -f"
+    sh script: "docker volume prune -f"
+    sh script: "docker network prune -f"
+}
+
+def workspaceCleanup = {
+    sh script: "sudo git clean -fdx", label: "Remove everything but files from git"
+}
+
+def withArtifactorySettings = { body ->
+    withCredentials([file(credentialsId: 'maven-artifactory-settings', variable: 'MVN_SETTINGS_PATH')]) {
+        sh script: "ln -sf ${env.MVN_SETTINGS_PATH} ~/.m2/settings.xml"
+        try {
+            body()
+        } finally {
+            sh script: "rm -f ~/.m2/settings.xml"
+        }
+    }
+}
+
+def withAWSCredentials = { body ->
+    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', accessKeyVariable: 'AWS_ACCESS_KEY_ID', credentialsId: AWS_CREDS_ID, secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
+        body()
+    }
+}
+
+def withAzureCredentials = { body ->
+    withCredentials([usernamePassword(credentialsId: AZURE_CREDS_ID, usernameVariable: 'AZURE_ACCOUNT', passwordVariable: 'AZURE_KEY')]) {
+        body()
+    }
+}
+
+def withGCSCredentials = { body ->
+    withCredentials([file(credentialsId: GCS_CREDS_ID, variable: 'GC_KEY')]) {
+        body()
+    }
+}
+
+def copyFilesByPattern = { filesPattern, destDir ->
+    sh script: """#!/bin/bash -x
+        shopt -s globstar
+        if  ls ${filesPattern}; then
+            for fname in ${filesPattern}; do
+                fname_root=\$(echo \${fname} | cut -d "/" -f1)
+                if ! [[ "\$fname_root" = "${destDir}" ]]; then
+                    mkdir -p \$(dirname -- "${destDir}/\${fname}")
+                    cp \$fname ${destDir}/\${fname}
+                fi
+            done
+        fi
+    """
+}
+
+def inspectException = { body ->
+    try {
+        body()
+    } catch(err) {
+        echo "Exception: ${err}"
+        def causeClasses = err.causes.collect {it.getClass()}
+        echo "Exception causes: ${causeClasses}"
+        throw err
+    }
+}
+
+def retryOnTimeout = { body ->
+    while(true) {
+        try {
+            inspectException {
+                body()
+            }
+            break
+        } catch(err) {
+            if (err instanceof org.jenkinsci.plugins.workflow.steps.FlowInterruptedException &&
+                err.causes.collect {it.getClass()}.contains(org.jenkinsci.plugins.workflow.steps.TimeoutStepExecution.ExceededTimeout)) {
+                continue
+            } else {
+                throw err
+            }
+        }
+    }
+}
+
+def artifactsWrapper = { body ->
+    try {
+        body()
+    } finally {
+        def stageArtifactsDirPath = "stage_${env.STAGE_NAME.replaceAll(~/[^A-Za-z0-9_-]/,'_')}"
+        sh script: "sudo mkdir -p /root/shared"
+        sh script: "mkdir -p ${stageArtifactsDirPath}"
+        // copy logs
+        sh script: "sudo bash -c '[ -d \"/root/shared/logs\" ] && cp -R /root/shared/logs ${stageArtifactsDirPath}/ || true'"
+        sh script: "sudo bash -c '[ -d \"/root/shared/tasklogs\" ] && cp -R /root/shared/tasklogs ${stageArtifactsDirPath}/ || true'"
+        // copy test reports
+        copyFilesByPattern("**/target/surefire-reports/*.xml", stageArtifactsDirPath)
+        copyFilesByPattern("**/target/failsafe-reports/*.xml", stageArtifactsDirPath)
+        // copy top-level jacoco reports
+        copyFilesByPattern("**/target/*.exec", stageArtifactsDirPath)
+        copyFilesByPattern("**/jacoco/*.html", stageArtifactsDirPath)
+        copyFilesByPattern("**/jacoco/*.xml", stageArtifactsDirPath)
+        copyFilesByPattern("**/jacoco/*.csv", stageArtifactsDirPath)
+        copyFilesByPattern("**/jacoco/jacoco-resources/*", stageArtifactsDirPath)
+        // copy detailed jacoco reports
+        copyFilesByPattern("**/jacoco/**/*.html", stageArtifactsDirPath)
+        copyFilesByPattern("**/jacoco/**/*.xml", stageArtifactsDirPath)
+        copyFilesByPattern("**/jacoco/**/*.csv", stageArtifactsDirPath)
+        // fixate artifacts
+        archiveArtifacts artifacts: "${stageArtifactsDirPath}/**", allowEmptyArchive: true
+    }
+}
+
+def heavyNode = { body ->
+    retryOnTimeout {
+        node('jenkinsOnDemand') {
+            artifactsWrapper {
+                body()
+            }
+        }
+    }
+}
+
+def lightweightNode = { body ->
+    retryOnTimeout {
+        node('jenkinsOnDemandMultiExec') {
+            artifactsWrapper {
+                body()
+            }
+        }
+    }
+}
+
+def ecrLogin = { imageURL ->
+    def registryHost = (imageURL =~ /^[0-9a-z.-]+/).getAt(0)
+    withAWSCredentials {
+        sh script: """
+            PATH=/home/jenkins/bin:/home/jenkins/.local/bin:\$PATH \
+            aws ecr get-login-password --region us-east-1 | \
+            docker login --username AWS --password-stdin ${registryHost}
+        """
+    }
+}
+
+def withM2Cache = { body ->
+    def destination = "${env.WORKSPACE}@tmp/.m2Cache"
+    def buildContext = "${env.WORKSPACE}@tmp/.m2CacheBuildContext"
+    ecrLogin(M2_CACHE_IMAGE)
+    timeout(time: 15, unit: 'MINUTES') {
+        sh script: """
+            docker pull ${M2_CACHE_IMAGE}:latest && \
+            rm -rf ${buildContext} && mkdir -p ${buildContext} && \
+            echo "FROM ${M2_CACHE_IMAGE}:latest" > ${buildContext}/Dockerfile && \
+            DOCKER_BUILDKIT=1 docker build --output type=local,dest=${destination} ${buildContext} || \
+            { echo "Probably ${M2_CACHE_IMAGE}:latest doesn't exist yet, so using empty dir instead" && mkdir -p ${destination}/.m2; }
+            sudo chmod a+w ${destination}/.m2
+        """
+    }
+    body(destination)
+}
+
+def uploadM2Cache = { cacheDirPath ->
+    def dockerfilePath = "${cacheDirPath}/m2CacheDockerfile"
+    ecrLogin(M2_CACHE_IMAGE)
+    sh script: """
+        cd ${cacheDirPath}
+        echo "FROM scratch" > ${dockerfilePath}
+        echo "ADD .m2 /.m2" >> ${dockerfilePath}
+        docker build -t ${M2_CACHE_IMAGE}:${BUILD_CACHE_TAG} -f ${dockerfilePath} .
+        docker tag ${M2_CACHE_IMAGE}:${BUILD_CACHE_TAG} ${M2_CACHE_IMAGE}:latest
+        docker push ${M2_CACHE_IMAGE}:${BUILD_CACHE_TAG}
+        docker push ${M2_CACHE_IMAGE}:latest
+    """
+}
+
+def downloadBuildCache = {
+    def buildContext = "${env.WORKSPACE}@tmp/.cacheBuildContext"
+    ecrLogin(BUILD_CACHE_IMAGE)
+    timeout(time: 15, unit: 'MINUTES') {
+        sh script: """
+            rm -rf ${buildContext}
+            mkdir -p ${buildContext}
+            echo "FROM ${BUILD_CACHE_IMAGE}:${BUILD_CACHE_TAG}" > ${buildContext}/Dockerfile
+            DOCKER_BUILDKIT=1 docker build --output type=local,dest=\$(pwd) ${buildContext}
+        """
+    }
+}
+
+def buildDockerBinaryImage = { fromImage ->
+    writeFile file: "${env.WORKSPACE}@tmp/DockerBinaryImageDockerfile", text: """\
+FROM ${fromImage}
+ARG DOCKER_VERSION=19.03.8
+RUN set -ex \
+    && curl -fsSLO https://download.docker.com/linux/static/stable/x86_64/docker-\${DOCKER_VERSION}.tgz \
+    && mv docker-\${DOCKER_VERSION}.tgz docker.tgz \
+    && tar xzvf docker.tgz \
+    && mv docker/docker /usr/local/bin/docker \
+    && rm -r docker docker.tgz
+RUN curl -s -L \
+    "https://github.com/docker/compose/releases/download/1.26.2/docker-compose-\$(uname -s)-\$(uname -m)" \
+    -o /usr/local/bin/docker-compose \
+    && chmod +x /usr/local/bin/docker-compose
+RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+RUN curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
+    && unzip awscliv2.zip \
+    && ./aws/install \
+    && rm awscliv2.zip \
+    && rm -rf aws
+RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
+    | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list \
+    && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+    |  apt-key --keyring /usr/share/keyrings/cloud.google.gpg add - \
+    && apt-get update -y \
+    && apt-get install google-cloud-sdk -y
+"""
+    def imageName = "${fromImage}-dbin-${env.STAGE_NAME.replaceAll(~/[^a-z0-9]/,'')}${env.BUILD_ID}"
+    docker.build(imageName, "${env.WORKSPACE}@tmp -f ${env.WORKSPACE}@tmp/DockerBinaryImageDockerfile")
+    return imageName
+}
+
+def integrationTestsWrapper = { stageName, jdkVersion, envMap, body ->
+    stage(stageName) {
+        heavyNode {
+            dockerInitCleanup()
+            sh script: "sudo rm -rf /root/shared"
+            sh script: "sudo mkdir -p /root/shared"
+            withM2Cache { cacheDir ->
+                checkout scm
+                workspaceCleanup()
+                downloadBuildCache()
+                docker.image(buildDockerBinaryImage("maven:3.6.3-jdk-${jdkVersion}")).inside("""\
+                    -v ${cacheDir}/.m2:/root/.m2 \
+                    -v /var/run/docker.sock:/var/run/docker.sock \
+                    -v /root/shared:/root/shared \
+                    -e DOCKER_IP=127.0.0.1 \
+                    --net host \
+                    -u root:root \
+                    """) {
+                    withArtifactorySettings {
+                        withEnv(envMap) {
+                            sh script: """
+                                echo "deb http://security.debian.org/debian-security jessie/updates main" >> /etc/apt/sources.list
+                                apt-get update -y
+                                apt-get install dnsutils -y
+                                apt-get install openssl=1.0.1t-1+deb8u12 -y --allow-downgrades
+                            """
+                            try {
+                                body()
+                            } finally {
+                                sh script: """#!/bin/bash -ex
+                                    if  ls ~/shared/logs/*.log; then
+                                        for v in ~/shared/logs/*.log; do
+                                            echo \$v logtail ========================
+                                            tail -100 \$v
+                                        done
+                                    fi
+                                    docker ps -a
+                                    for v in broker middlemanager overlord router coordinator historical; do
+                                        echo \$v dmesg ========================
+                                        docker ps --format {{.Names}} | grep -q druid-\$v && docker exec druid-\$v sh -c 'dmesg | tail -3' || true
+                                    done
+                                """
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+def s3DeepStorageTests = { stageName, jdkVersion, envMap ->
+    integrationTestsWrapper(stageName, jdkVersion, envMap) {
+        withAWSCredentials {
+            def cloudpath = UUID.randomUUID().toString()
+            sh script: """
+                aws s3 sync \
+                ${WORKSPACE}/integration-tests/src/test/resources/data/batch_index/ s3://druid-qa/${cloudpath} \
+                --exclude "*" --include "wikipedia_index_data*.json"
+            """
+            writeFile file: "jenkins/s3-config", text: "druid_storage_type=s3\ndruid_storage_bucket=druid-qa\ndruid_storage_baseKey=${cloudpath}\ndruid_s3_accessKey=${AWS_ACCESS_KEY_ID}\ndruid_s3_secretKey=${AWS_SECRET_ACCESS_KEY}\nAWS_REGION=us-east-1\ndruid_extensions_loadList=[\"druid-s3-extensions\",\"druid-hdfs-storage\"]"
+            try {
+                sh script: """
+                    ${MVN_OPTS}
+                    ${MVN} verify -P integration-tests -pl integration-tests \
+                    -Dgroups=s3-deep-storage -Doverride.config.path=${WORKSPACE}/jenkins/s3-config \${JVM_RUNTIME} -Ddruid.test.config.cloudBucket=druid-qa -Ddruid.test.config.cloudPath=${cloudpath}/ -Dstart.hadoop.docker=true \
+                    -ff ${MAVEN_SKIP} -Djacoco.skip=true
+                """, label: "s3-deep-storage with ${env.JVM_RUNTIME}"
+            }
+            finally {
+                sh script: "aws s3 rm s3://druid-qa/${cloudpath}  --recursive"
+            }
+        }
+    }
+}
+
+def kinesisDeepStorageTests = { stageName, jdkVersion, envMap ->
+    integrationTestsWrapper(stageName, jdkVersion, envMap) {
+        lock('awsResource') {
+            withAWSCredentials {
+                writeFile file: "jenkins/kinesis-config", text: "druid_kinesis_accessKey=${AWS_ACCESS_KEY_ID}\ndruid_kinesis_secretKey=${AWS_SECRET_ACCESS_KEY}\nAWS_REGION=us-east-1\ndruid_extensions_loadList=[\"druid-kinesis-indexing-service\"]"
+                sh script: """
+                    ${MVN_OPTS}
+                    ${MVN} verify -P integration-tests -pl integration-tests \
+                    -Dgroups=kinesis-index -Doverride.config.path=${WORKSPACE}/jenkins/kinesis-config \${JVM_RUNTIME} -Ddruid.test.config.streamEndpoint=kinesis.us-east-1.amazonaws.com -Dstart.hadoop.docker=true \
+                    -ff ${MAVEN_SKIP} -Djacoco.skip=true
+                """, label: "kinesis-deep-storage with ${env.JVM_RUNTIME}"
+            }
+        }
+    }
+}
+
+def azureDeepStorageTests = { stageName, jdkVersion, envMap ->
+    integrationTestsWrapper(stageName, jdkVersion, envMap) {
+        withAzureCredentials {
+            def containerName = UUID.randomUUID().toString()
+            sh script: """
+                az storage container create -n ${containerName} \
+                --public-access blob \
+                --account-name ${AZURE_ACCOUNT} --account-key ${AZURE_KEY}
+            """
+            writeFile file: "jenkins/azure-config", text: "druid_storage_type=azure\ndruid_azure_account=$AZURE_ACCOUNT\ndruid_azure_key=$AZURE_KEY\ndruid_azure_container=${containerName}\ndruid_extensions_loadList=[\"druid-azure-extensions\",\"druid-hdfs-storage\"]"
+            try {
+                sh script: """
+                    az storage blob upload-batch \
+                    --account-name ${AZURE_ACCOUNT} --account-key ${AZURE_KEY} \
+                    -d ${containerName} \
+                    --source ${WORKSPACE}/integration-tests/src/test/resources/data/batch_index/ --pattern "wikipedia_index_data*.json"
+                """
+                sh script: """
+                    ${MVN_OPTS}
+                    ${MVN} verify -P integration-tests -pl integration-tests \
+                    -Dgroups=azure-deep-storage -Doverride.config.path=${WORKSPACE}/jenkins/azure-config \${JVM_RUNTIME} -Ddruid.test.config.cloudBucket=${containerName} -Ddruid.test.config.cloudPath= -Dstart.hadoop.docker=true \
+                    -ff ${MAVEN_SKIP} -Djacoco.skip=true
+                """, label: "azure-deep-storage with ${env.JVM_RUNTIME}"
+            }
+            finally {
+                sh script: """
+                     az storage container delete -n ${containerName}\
+                     --account-name ${AZURE_ACCOUNT} --account-key ${AZURE_KEY}
+                """
+            }
+        }
+    }
+}
+
+def gcsDeepStorageTests = { stageName, jdkVersion, envMap ->
+    integrationTestsWrapper(stageName, jdkVersion, envMap) {
+        withGCSCredentials {
+            def cloudpath = "gcs-test-${UUID.randomUUID().toString()}/"
+            def bucket = "imply-qa-testing"
+
+            writeFile file: "${WORKSPACE}/jenkins/gcs-config", text: "druid_storage_type=google\ndruid_google_bucket=${bucket}\ndruid_google_prefix=${cloudpath}\ndruid_extensions_loadList=[\"druid-google-extensions\",\"druid-hdfs-storage\"]\nGOOGLE_APPLICATION_CREDENTIALS=/shared/docker/credentials/creds.json"
+            sh script: """
+                mkdir -p ${WORKSPACE}/jenkins/gcs
+                cp ${env.GC_KEY} ${WORKSPACE}/jenkins/gcs/creds.json
+                chmod 764 ${WORKSPACE}/jenkins/gcs/creds.json
+                gsutil -o Credentials:gs_service_key_file=${WORKSPACE}/jenkins/gcs/creds.json cp ${WORKSPACE}/integration-tests/src/test/resources/data/batch_index/wikipedia_index_data*.json gs://${bucket}/${cloudpath}
+                """, label: "copy gcs creds"
+            try {
+                sh script: MVN_OPTS + "\n" + MVN +
+                    ' verify -P integration-tests -pl integration-tests' +
+                    " -Doverride.config.path=${WORKSPACE}/jenkins/gcs-config -Dresource.file.dir.path=${WORKSPACE}/jenkins/gcs" +
+                    " -Dgroups=gcs-deep-storage \${JVM_RUNTIME} -Ddruid.test.config.cloudBucket=${bucket} -Ddruid.test.config.cloudPath=${cloudpath} -Dstart.hadoop.docker=true" +
+                    " -ff ${MAVEN_SKIP} -Djacoco.skip=true", label: "gcs-deep-storage with ${env.JVM_RUNTIME}"
+            } finally {
+                sh script: "gsutil -o Credentials:gs_service_key_file=${WORKSPACE}/jenkins/gcs/creds.json rm -r gs://${bucket}/${cloudpath}"
+            }
+
+        }
+    }
+}
+
+def hdfsDeepStorageTests = { stageName, jdkVersion, envMap ->
+    integrationTestsWrapper(stageName, jdkVersion, envMap) {
+        writeFile file: "${WORKSPACE}/jenkins/hdfs-config", text: "druid_storage_type=hdfs\n" +
+            "druid_storage_storageDirectory=/druid/segments\n" +
+            "druid_extensions_loadList=[\"druid-hdfs-storage\"]\n" +
+            "druid_indexer_logs_type=hdfs\n" +
+            "druid_indexer_logs_directory=/druid/indexing-logs"
+        sh script: MVN_OPTS + "\n" + MVN +
+            ' verify -P integration-tests -pl integration-tests' +
+            " -Doverride.config.path=${WORKSPACE}/jenkins/hdfs-config" +
+            ' -Dgroups=hdfs-deep-storage -Dstart.hadoop.docker=true ${JVM_RUNTIME} -Ddruid.test.config.extraDatasourceNameSuffix="" -Dit.test=ITHdfsToHdfsParallelIndexTest' +
+            " -ff ${MAVEN_SKIP} -Djacoco.skip=true", label: "hdfs-deep-storage with ${env.JVM_RUNTIME}"
+    }
+}
+
+stage('Maven install') {
+    heavyNode {
+        withM2Cache { cacheDir ->
+            checkout scm
+            workspaceCleanup()
+            docker.image('maven:3.6.3-jdk-8').inside("""\
+                --memory=8g --memory-reservation=4g \
+                -e HOME=/tmp -e _JAVA_OPTIONS=-Duser.home=/tmp -v ${cacheDir}/.m2:/tmp/.m2 \
+                """ ) {
+                withArtifactorySettings {
+                    sh script: "${MVN_OPTS} && ${MVN} clean install -q -ff ${MAVEN_SKIP} ${MAVEN_SKIP_TESTS} -T 1C", label: "Maven install"
+                }
+            }
+            uploadM2Cache(cacheDir)
+
+            def contextPath = "${env.WORKSPACE}@tmp/.buildcachecontext"
+            def dockerfileName = "BuildCacheDockerfile"
+
+            sh script: """
+                rm -rf ${contextPath}
+                mkdir -p ${contextPath}
+                git status --ignored --porcelain | egrep '^\\!\\!' | grep -v web-console | sed 's|/\$||' | awk -F'\\!\\! ' '{print \$2}'  | tee -a ${contextPath}/artifacts.txt
+                for aname in \$(cat ${contextPath}/artifacts.txt | grep -F '/'); do mkdir -p \$(dirname -- "${contextPath}/root/\${aname}"); done
+                cat ${contextPath}/artifacts.txt | xargs -I BUILDSOURCE mv BUILDSOURCE ${contextPath}/root/BUILDSOURCE
+                cd ${contextPath}
+                echo "FROM scratch" > ${dockerfileName}
+                echo "COPY root/ /" >> ${dockerfileName}
+                docker build  -t ${BUILD_CACHE_IMAGE}:${BUILD_CACHE_TAG} -f ${dockerfileName} .
+                docker push ${BUILD_CACHE_IMAGE}:${BUILD_CACHE_TAG}
+            """
+        }
+    }
+}
+
+stage("Checks") {
+    parallel "security vulnerabilities": {
+        stage("security vulnerabilities") {
+            lightweightNode {
+                withM2Cache { cacheDir ->
+                    docker.image("maven:3.6.3-jdk-8").inside(
+                        "--memory=8g --memory-reservation=4g -v ${cacheDir}/.m2:/root/.m2 -u root:root") {
+                        checkout scm
+                        withArtifactorySettings {
+                            sh script: """
+                                ${MVN} dependency-check:check || { echo "
+                                The OWASP dependency check has found security vulnerabilities. Please use a newer version
+                                of the dependency that does not have vulnerabilities. If the analysis has false positives,
+                                they can be suppressed by adding entries to owasp-dependency-check-suppressions.xml (for more
+                                information, see https://jeremylong.github.io/DependencyCheck/general/suppression.html).
+                                " && false; }
+                            """
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "(Compile=openjdk8, Run=openjdk8) s3 deep storage test": {
+        s3DeepStorageTests("(Compile=openjdk8, Run=openjdk8) s3 deep storage test", 8, ['JVM_RUNTIME=-Djvm.runtime=8'])
+    },
+    "(Compile=openjdk8, Run=openjdk8) kinesis deep storage test": {
+        kinesisDeepStorageTests("(Compile=openjdk8, Run=openjdk8) kinesis deep storage test", 8, ['JVM_RUNTIME=-Djvm.runtime=8'])
+    },
+    "(Compile=openjdk8, Run=openjdk8) azure deep storage test": {
+        azureDeepStorageTests("(Compile=openjdk8, Run=openjdk8) azure deep storage test", 8, ['JVM_RUNTIME=-Djvm.runtime=8'])
+    },
+    "(Compile=openjdk8, Run=openjdk8) hdfs deep storage test": {
+        hdfsDeepStorageTests("(Compile=openjdk8, Run=openjdk8) hdfs deep storage test", 8, ['JVM_RUNTIME=-Djvm.runtime=8'])
+    },
+    "(Compile=openjdk8, Run=openjdk8) gcs deep storage test": {
+        gcsDeepStorageTests("(Compile=openjdk8, Run=openjdk8) gcs deep storage test", 8, ['JVM_RUNTIME=-Djvm.runtime=8'])
+    },
+
+    "(Compile=openjdk8, Run=openjdk11) s3 deep storage test": {
+        s3DeepStorageTests("(Compile=openjdk8, Run=openjdk11) s3 deep storage test", 8, ['JVM_RUNTIME=-Djvm.runtime=11'])
+    },
+    "(Compile=openjdk8, Run=openjdk11) azure deep storage test": {
+        azureDeepStorageTests("(Compile=openjdk8, Run=openjdk11) azure deep storage test", 8, ['JVM_RUNTIME=-Djvm.runtime=11'])
+    },
+    "(Compile=openjdk8, Run=openjdk11) hdfs deep storage test": {
+        hdfsDeepStorageTests("(Compile=openjdk8, Run=openjdk11) hdfs deep storage test", 8, ['JVM_RUNTIME=-Djvm.runtime=11'])
+    },
+    "(Compile=openjdk8, Run=openjdk11) gcs deep storage test": {
+        gcsDeepStorageTests("(Compile=openjdk8, Run=openjdk11) gcs deep storage test", 8, ['JVM_RUNTIME=-Djvm.runtime=11'])
+    }
+}

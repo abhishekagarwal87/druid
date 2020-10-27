@@ -1,0 +1,261 @@
+import org.jenkinsci.plugins.pipeline.modeldefinition.Utils
+
+def AWS_CREDS_ID                = 'aws'
+def GIT_GREDS_ID                = 'github-implydata-userpass'
+def NODE_LABEL                  = 'jenkinsOnDemand'
+def MVN_SETTINGS_CONFIG_FILE    = 'maven-artifactory-settings'
+def SBT_OPTS_CONFIG_FILE        = 'sbt-opts'
+def SBT_REPOS_CONFIG_FILE       = 'sbt-repositories'
+
+def imperative_when = { boolean condition, body ->
+    def config = [:]
+    body.resolveStrategy = Closure.OWNER_FIRST
+    body.delegate = config
+
+    if (condition) {
+        body()
+    } else {
+        echo "Skipping ${env.STAGE_NAME}..."
+        Utils.markStageSkippedForConditional(env.STAGE_NAME)
+    }
+}
+
+void setBuildStatus(String repoFullname, String commitSha, String message, String state) {
+    stage("set build status to ${state}") {
+        step([
+            $class: "GitHubCommitStatusSetter",
+            reposSource: [$class: "ManuallyEnteredRepositorySource", url: "https://github.com/${repoFullname}"],
+            commitShaSource: [$class: "ManuallyEnteredShaSource", sha: commitSha],
+            contextSource: [$class: "ManuallyEnteredCommitContextSource", context: "continuous-delivery/jenkins/branch"],
+            errorHandlers: [[$class: "ChangingBuildStatusErrorHandler", result: "UNSTABLE"]],
+            statusResultSource: [ $class: "ConditionalStatusResultSource", results: [[$class: "AnyBuildResult", message: message, state: state]]]
+        ])
+    }
+}
+
+def statusWrapper = { String repoFullname, String commitSha, body ->
+    setBuildStatus(repoFullname, commitSha, "Build is running", "PENDING")
+    try {
+        body()
+        setBuildStatus(repoFullname, commitSha, "Build complete", "SUCCESS")
+    } catch(err) {
+        setBuildStatus(repoFullname, commitSha, "Build failed", "FAILURE")
+        throw err
+    }
+}
+
+def getPayloadValue = { String payloadKey ->
+    def val = params["OVERRIDE_${payloadKey}"] ?: env[payloadKey]
+    echo "reading ${payloadKey}: ${val}"
+    return val
+}
+
+def isDryRun = {
+    return  (!getPayloadValue("PAYLOAD_REPO_FULLNAME")
+            || !getPayloadValue("PAYLOAD_CHECK_SUITE_HEAD_BRANCH")
+            || !getPayloadValue("PAYLOAD_CHECK_SUITE_HEAD_SHA")
+            || !getPayloadValue("PAYLOAD_CHECK_SUITE_APP_SLUG")
+            || !getPayloadValue("PAYLOAD_CHECK_SUITE_STATUS")
+            || !getPayloadValue("PAYLOAD_CHECK_SUITE_CONCLUSION"))
+}
+
+def skippableStage = { name, body ->
+    stage(name) {
+        imperative_when(!isDryRun()) {
+            body()
+        }
+    }
+}
+
+def withAWSCredentials = { body ->
+    withCredentials([
+        [$class: 'AmazonWebServicesCredentialsBinding',
+            accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+            credentialsId: AWS_CREDS_ID,
+            secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
+        body()
+    }
+}
+
+def ecrLogin = { imageURL ->
+    def registryHost = (imageURL =~ /^[0-9a-z.-]+/).getAt(0)
+    withAWSCredentials {
+        sh script: """
+            PATH=/home/jenkins/bin:/home/jenkins/.local/bin:\$PATH \
+            aws ecr get-login-password --region us-east-1 | \
+            docker login --username AWS --password-stdin ${registryHost}
+        """
+    }
+}
+
+def targetBranchPattern = { branchName ->
+    if(branchName =~ /^IMPLY-\d+/) {
+        return "${branchName}-testing.*"
+    } else {
+        return branchName
+    }
+}
+
+def appVersion = { branchName ->
+    def matchResult = (branchName =~ /^\d\.\d\d?\.\d/)
+    if(matchResult) {
+        return matchResult.getAt(0)
+    } else {
+        return "SNAPSHOT"
+    }
+}
+
+properties([
+    pipelineTriggers([
+        [$class: 'GenericTrigger',
+            genericVariables: [
+                [key: 'PAYLOAD_REPO_FULLNAME', value: '$.repository.full_name'],
+                [key: 'PAYLOAD_CHECK_SUITE_HEAD_BRANCH', value: '$.check_suite.head_branch', defaultValue: ''],
+                [key: 'PAYLOAD_CHECK_SUITE_HEAD_SHA', value: '$.check_suite.head_sha', defaultValue: ''],
+                [key: 'PAYLOAD_CHECK_SUITE_APP_SLUG', value: '$.check_suite.app.slug', defaultValue: ''],
+                [key: 'PAYLOAD_CHECK_SUITE_STATUS', value: '$.check_suite.status', defaultValue: ''],
+                [key: 'PAYLOAD_CHECK_SUITE_CONCLUSION', value: '$.check_suite.conclusion', defaultValue: '']
+            ],
+            causeString: 'Triggered after successfull TravisCI check on $PAYLOAD_REPO_FULLNAME for commit: $PAYLOAD_CHECK_SUITE_HEAD_SHA (branch: $PAYLOAD_CHECK_SUITE_HEAD_BRANCH)',
+            token: 'druid',
+            silentResponse: false,
+            regexpFilterText: '$PAYLOAD_CHECK_SUITE_APP_SLUG:$PAYLOAD_CHECK_SUITE_STATUS:$PAYLOAD_CHECK_SUITE_CONCLUSION:$PAYLOAD_REPO_FULLNAME:$PAYLOAD_CHECK_SUITE_HEAD_BRANCH',
+            regexpFilterExpression: "^travis-ci:completed:success:implydata/druid:${targetBranchPattern(BRANCH_NAME)}\$"
+        ]
+    ]),
+    parameters([
+        string(name: 'DISTRIBUTION_REPO_URL',defaultValue: 'https://github.com/implydata/distribution.git', description: 'git url of build scripts'),
+        string(name: 'DISTRIBUTION_HEAD', defaultValue: 'refs/heads/master', description: 'branch or tag of scripts repository to checkout'),
+        string(name: 'BUILD_DOCKER_IMAGE', defaultValue: '269875963461.dkr.ecr.us-east-1.amazonaws.com/buildabear:20200923', description: 'ECR image with dependencies'),
+        string(name: 'CACHE_DOCKER_IMAGE', defaultValue: '018895040333.dkr.ecr.us-east-1.amazonaws.com/distribution:latest-qa-druid', description: ''),
+        string(name: 'S3_UPLOAD_PREFIX', defaultValue: 's3://imply-build-artifacts/druid'),
+
+        string(name: 'OVERRIDE_PAYLOAD_REPO_FULLNAME', defaultValue: ''),
+        string(name: 'OVERRIDE_PAYLOAD_CHECK_SUITE_HEAD_BRANCH', defaultValue: ''),
+        string(name: 'OVERRIDE_PAYLOAD_CHECK_SUITE_HEAD_SHA', defaultValue: ''),
+        string(name: 'OVERRIDE_PAYLOAD_CHECK_SUITE_APP_SLUG', defaultValue: ''),
+        string(name: 'OVERRIDE_PAYLOAD_CHECK_SUITE_STATUS', defaultValue: ''),
+        string(name: 'OVERRIDE_PAYLOAD_CHECK_SUITE_CONCLUSION', defaultValue:  '')
+    ])
+])
+
+def ecrCacheWrapper = { cacheImageURL, body ->
+    def cacheDestination = "/tmp/cache-dest"
+    stage('ecr docker cache download') {
+        ecrLogin(cacheImageURL)
+        sh """
+            echo "FROM ${cacheImageURL}" | DOCKER_BUILDKIT=1 docker build --output type=local,dest=${cacheDestination} - || true
+            mkdir -p ${cacheDestination}
+            ls -lat ${cacheDestination}
+        """
+    }
+    body(cacheDestination)
+    stage('ecr docker cache upload') {
+        ecrLogin(cacheImageURL)
+        sh """
+            cd ${cacheDestination}
+            echo "FROM scratch" > Dockerfile_dist_upload
+            echo "ADD .sbt/boot /.sbt/boot" >> Dockerfile_dist_upload
+            echo "ADD .ivy2/cache /.ivy2/cache" >> Dockerfile_dist_upload
+            docker build -f Dockerfile_dist_upload -t ${cacheImageURL} .
+            docker push ${cacheImageURL}
+        """
+    }
+}
+
+
+skippableStage('publish pipeline') {
+    node(NODE_LABEL) {
+        statusWrapper(env.PAYLOAD_REPO_FULLNAME, env.PAYLOAD_CHECK_SUITE_HEAD_SHA) {
+            stage('checkout build scripts') {
+                checkout([$class: 'GitSCM',
+                    branches: [[name: params.DISTRIBUTION_HEAD]],
+                    doGenerateSubmoduleConfigurations: false,
+                    extensions: [], submoduleCfg: [],
+                    userRemoteConfigs: [[credentialsId: GIT_GREDS_ID,
+                    url: params.DISTRIBUTION_REPO_URL]]
+                ])
+            }
+            stage('docker login') {
+                ecrLogin(params.BUILD_DOCKER_IMAGE)
+            }
+            ecrCacheWrapper(params.CACHE_DOCKER_IMAGE) { cacheDir ->
+                withCredentials([
+                    file(credentialsId: MVN_SETTINGS_CONFIG_FILE, variable: 'MVN_SETTINGS_PATH'),
+                    usernamePassword(credentialsId: GIT_GREDS_ID, passwordVariable: 'GIT_CREDS_PSW', usernameVariable: 'GIT_CREDS_USR')
+                    ]) {
+                    configFileProvider([
+                        configFile(fileId: SBT_OPTS_CONFIG_FILE, variable: 'SBT_OPTS_PATH'),
+                        configFile(fileId: SBT_REPOS_CONFIG_FILE, variable: 'SBT_REPOS_PATH')
+                        ]) {
+                        ecrLogin(params.BUILD_DOCKER_IMAGE)
+                        docker.image(params.BUILD_DOCKER_IMAGE).inside(
+                            """ -u root:root \
+                                -v ${cacheDir}/.sbt/boot:/root/.sbt/boot \
+                                -v ${cacheDir}/.ivy2/cache:/root/.ivy2/cache \
+                                -v ${env.SBT_REPOS_PATH}:/root/.sbt/repositories \
+                                -v ${env.SBT_OPTS_PATH}:/usr/local/etc/sbtopts \
+                                -v ${env.MVN_SETTINGS_PATH}:/root/.m2/settings.xml \
+                                -e GIT_CREDS_PSW=${env.GIT_CREDS_PSW} \
+                                -e GIT_ASKPASS=${env.WORKSPACE}/bin/askpass.sh \
+                                -e GIT_CREDS_USR=${env.GIT_CREDS_USR} \
+                                -e SCRIPTS_HEAD=${params.SCRIPTS_HEAD} \
+                                -e PAYLOAD_CHECK_SUITE_HEAD_BRANCH=${getPayloadValue("PAYLOAD_CHECK_SUITE_HEAD_BRANCH")} \
+                                -e PAYLOAD_CHECK_SUITE_HEAD_SHA=${getPayloadValue("PAYLOAD_CHECK_SUITE_HEAD_SHA")} \
+                                -e BUILD_DIR=/tmp/nightly-build"""
+                            ) {
+                            stage('build') {
+                                sh '''
+                                    echo -e '#!/bin/bash\nPATH=/opt/maven/apache-maven-3.5.4/bin:$PATH exec mvn -B $@' > /usr/bin/mvn
+                                    chmod u+x /usr/bin/mvn
+
+                                    export UPSTREAM_COMMITISH=$PAYLOAD_CHECK_SUITE_HEAD_BRANCH
+
+                                    cat <<EOF > /tmp/stubs.sh
+                                        function src/build/pivot { echo 'pivot build is stubbed'; }
+                                        function git(){
+                                            case \\$1 in
+                                              checkout)
+                                                REMOTE_URL=\\$(/usr/bin/git config --get remote.origin.url)
+                                                if echo \\$REMOTE_URL | grep -q -F '/druid.git'; then
+                                                    /usr/bin/git fetch --depth=50
+                                                    /usr/bin/git checkout $PAYLOAD_CHECK_SUITE_HEAD_SHA
+                                                else
+                                                    /usr/bin/git \\$@
+                                                fi
+                                                ;;
+                                              *)
+                                                /usr/bin/git \\$@
+                                                ;;
+                                            esac
+                                        }
+                                    EOF
+                                    export BASH_ENV="/tmp/stubs.sh"
+
+                                    ./bin/test-build-nightly
+                                    if ! ls ${BUILD_DIR}/*.tar.gz 1> /dev/null 2>&1; then
+                                        echo "Tarball not found"
+                                        exit 1
+                                    fi
+                                '''.replaceAll(/\n\s+EOF/,"\nEOF")
+                            }
+
+                            stage('build upload') {
+                                withAWSCredentials {
+                                    sh """#!/bin/bash -x
+                                        BUILD_FILENAME=\$(basename \$(ls \${BUILD_DIR}/*.tar.gz))
+                                        APP_VERSION=${appVersion(BRANCH_NAME)}
+
+                                        aws s3 cp \${BUILD_DIR}/\${BUILD_FILENAME} \
+                                            ${params.S3_UPLOAD_PREFIX}/druid-\$APP_VERSION-\${PAYLOAD_CHECK_SUITE_HEAD_SHA:0:8}.tar.gz \
+                                            --acl bucket-owner-full-control --no-progress
+                                    """
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
