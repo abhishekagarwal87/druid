@@ -133,6 +133,45 @@ Sample specs:
 ...
 ```
 
+```json
+...
+    "ioConfig": {
+      "type": "index_parallel",
+      "inputSource": {
+        "type": "s3",
+        "uris": ["s3://foo/bar/file.json", "s3://bar/foo/file2.json"],
+        "endpointConfig": {
+             "url" : "s3-store.aws.com",
+             "signingRegion" : "us-west-2"
+         },
+         "clientConfig": {
+             "protocol" : "http",
+             "disableChunkedEncoding" : true,
+             "enablePathStyleAccess" : true,
+             "forceGlobalBucketAccessEnabled" : false
+         },
+         "proxyConfig": {
+             "host" : "proxy-s3.aws.com",
+             "port" : 8888,
+             "username" : "admin",
+             "password" : "admin"
+         },
+
+        "properties": {
+          "accessKeyId": "KLJ78979SDFdS2",
+          "secretAccessKey": "KLS89s98sKJHKJKJH8721lljkd",
+          "assumeRoleArn": "arn:aws:iam::2981002874992:role/role-s3"
+        }
+      },
+      "inputFormat": {
+        "type": "json"
+      },
+      ...
+    },
+...
+```
+
+
 |property|description|default|required?|
 |--------|-----------|-------|---------|
 |type|This should be `s3`.|None|yes|

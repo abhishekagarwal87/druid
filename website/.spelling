@@ -240,6 +240,7 @@ broadcasted
 checksums
 classpath
 clickstream
+clientConfig
 codebase
 codec
 colocated
@@ -275,6 +276,7 @@ druid–kubernetes-extensions
 e.g.
 encodings
 endian
+endpointConfig
 enum
 expectedType
 expr
@@ -400,6 +402,7 @@ processFromRaw
 programmatically
 proto
 proxied
+proxyConfig
 QPS
 quantile
 quantiles
