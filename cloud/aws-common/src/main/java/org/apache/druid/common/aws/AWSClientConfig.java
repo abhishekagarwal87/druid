@@ -55,15 +55,4 @@ public class AWSClientConfig
   {
     return forceGlobalBucketAccessEnabled;
   }
-
-  @Override
-  public String toString()
-  {
-    return "AWSClientConfig{" +
-           "protocol='" + protocol + '\'' +
-           ", disableChunkedEncoding=" + disableChunkedEncoding +
-           ", enablePathStyleAccess=" + enablePathStyleAccess +
-           ", forceGlobalBucketAccessEnabled=" + forceGlobalBucketAccessEnabled +
-           '}';
-  }
 }
