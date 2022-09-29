@@ -47,6 +47,7 @@ import org.apache.druid.java.util.common.Pair;
 import org.apache.druid.java.util.common.granularity.Granularities;
 import org.apache.druid.java.util.common.granularity.Granularity;
 import org.apache.druid.query.DataSource;
+import org.apache.druid.query.InlineDataSource;
 import org.apache.druid.query.JoinDataSource;
 import org.apache.druid.query.Query;
 import org.apache.druid.query.QueryContext;
@@ -1261,7 +1262,10 @@ public class DruidQuery
     long scanOffset = 0L;
     long scanLimit = 0L;
 
-    if (sorting != null) {
+    if (sorting == null || isAnEmptyInlineDatasource(dataSource)) {
+      // order-by can be removed if datasource is empty.
+      orderByColumns = Collections.emptyList();
+    } else {
       scanOffset = sorting.getOffsetLimit().getOffset();
 
       if (sorting.getOffsetLimit().hasLimit()) {
@@ -1284,8 +1288,6 @@ public class DruidQuery
                   : ScanQuery.Order.ASCENDING
               )
       ).collect(Collectors.toList());
-    } else {
-      orderByColumns = Collections.emptyList();
     }
 
     if (!plannerContext.engineHasFeature(EngineFeature.SCAN_ORDER_BY_NON_TIME) && !orderByColumns.isEmpty()) {
@@ -1379,5 +1381,15 @@ public class DruidQuery
     } else {
       return queryContext;
     }
+  }
+
+  private boolean isAnEmptyInlineDatasource(DataSource dataSource)
+  {
+    if (dataSource instanceof InlineDataSource) {
+      InlineDataSource inlineDataSource = (InlineDataSource) dataSource;
+      return !inlineDataSource.getRows().iterator().hasNext();
+    }
+
+    return false;
   }
 }

@@ -3816,6 +3816,35 @@ public class CalciteQueryTest extends BaseCalciteQueryTest
   }
 
   @Test
+  public void testScanOrderByTimeWithAlwaysFalseSelect()
+  {
+    testQuery(
+        "SELECT __time, dim2\n" +
+            "FROM \"druid\".\"numfoo\"\n" +
+            "WHERE false " +
+            "ORDER BY \"__time\" DESC\n" +
+            "LIMIT 10",
+        ImmutableList.of(
+            Druids.newScanQueryBuilder()
+                .dataSource(InlineDataSource.fromIterable(
+                    ImmutableList.of(),
+                    RowSignature.builder()
+                        .add("__time", ColumnType.LONG)
+                        .add("dim2", ColumnType.STRING)
+                        .build()
+                ))
+                .intervals(querySegmentSpec(Filtration.eternity()))
+                .columns("__time", "dim2")
+                .context(QUERY_CONTEXT_DEFAULT)
+                .resultFormat(ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
+                .legacy(false)
+                .build()
+        ),
+        ImmutableList.of()
+    );
+  }
+
+  @Test
   public void testCoalesceColumns()
   {
     // Doesn't conform to the SQL standard, but it's how we do it.
