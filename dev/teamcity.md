@@ -52,7 +52,7 @@ you an e-mail with a link to the ticket. Note that:
  that if you don't see how to resolve some problem with a build.
  - You don't need to be a Druid committer to do this. Any Druid contributor can contact TeamCity support.
 
-### Creating a custom inspection from a Structural Search pattern
+### Creating a custom inspection from a Structural Search pattern ll
 
 1. Open a structural search dialog: `Edit` -> `Find` -> `Search Structurally...`
 
