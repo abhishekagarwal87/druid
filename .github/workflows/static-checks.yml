@@ -44,6 +44,19 @@ jobs:
         java: [ 'jdk8', 'jdk11', 'jdk17' ]
     runs-on: ubuntu-latest
     steps:
+      - uses: dorny/paths-filter@v2
+        if: ${{ github.event_name == 'pull_request' }}
+        name: filter
+        with:
+          # Enable listing of files matching each filter.
+          # Paths to files will be available in `${FILTER_NAME}_files` output variable.
+          # Paths will be escaped and space-delimited.
+          # Output is usable as command-line argument list in Linux shell
+          list-files: shell
+          filters: |
+            java:
+              - added|modified: '*.java'
+
       - name: checkout branch
         uses: actions/checkout@v3
 
@@ -125,15 +138,7 @@ jobs:
       - name: intellij inspections
         if: ${{ matrix.java == 'jdk8' }}
         run: |
-          docker run --rm \
-          -v $(pwd):/project \
-          -v ~/.m2:/home/inspect/.m2 \
-          -v $(pwd)/.idea/misc-for-inspection.xml:/project/.idea/misc.xml \
-          ccaominh/intellij-inspect:1.0.0 \
-          /project/pom.xml \
-          /project/.idea/inspectionProfiles/Druid.xml \
-          --levels ERROR \
-          --scope JavaInspectionsScope
+          ./.github/scripts/intellij_inspections_script.sh ${{ steps.filter.outputs.java_files }}
 
   web-checks:
     strategy:

@@ -27,7 +27,8 @@ should be moved when that IntelliJ's issue is fixed.
 because the current rate of false-positives produced by this inspection is very high, see
 https://youtrack.jetbrains.com/issue/IDEA-153047#focus=streamItem-27-3326648.0-0.
 
-2) [`misc.xml`](misc.xml), `ProjectResources` component: this component is needed because IntelliJ verifies XML
+2) [`misc-for-inspection.xml`](misc-for-inspection.xml), `ProjectResources` component: this component is needed 
+   because IntelliJ verifies XML
 documents by the schema. XML documents usually reference those schemas as URLs:
 ```
 <assembly xmlns="http://maven.apache.org/ASSEMBLY/2.0.0"
