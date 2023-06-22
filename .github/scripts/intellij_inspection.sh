@@ -24,7 +24,7 @@ if [ $(echo "$changed_java_files" | wc -l) -gt 50 ]; then
   file_list="${file_list}||file:*.java"
 else
   for file in $changed_java_files; do
-    file_list="${file_list}||file:${file}"
+    file_list="${file_list}||file:.../${file}"
   done
 fi
 

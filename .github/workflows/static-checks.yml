@@ -55,7 +55,7 @@ jobs:
           list-files: shell
           filters: |
             java:
-              - added|modified: '*.java'
+              - added|modified: '**/*.java'
 
       - name: checkout branch
         uses: actions/checkout@v3
