@@ -46,7 +46,7 @@ jobs:
     steps:
       - uses: dorny/paths-filter@v2
         if: ${{ github.event_name == 'pull_request' }}
-        name: filter
+        id: filter
         with:
           # Enable listing of files matching each filter.
           # Paths to files will be available in `${FILTER_NAME}_files` output variable.
@@ -73,7 +73,7 @@ jobs:
         if: ${{ matrix.java == 'jdk8' }}
         run: |
           ./.github/scripts/intellij_inspection.sh ${{ steps.filter.outputs.java_files }}
-          
+
       - name: packaging check
         run: |
           ./.github/scripts/setup_generate_license.sh
