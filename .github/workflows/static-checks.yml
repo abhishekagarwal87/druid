@@ -69,6 +69,11 @@ jobs:
         run: |
           echo "JAVA_HOME=$JAVA_HOME_${{ env.java_version }}_X64" >> $GITHUB_ENV
 
+      - name: intellij inspections
+        if: ${{ matrix.java == 'jdk8' }}
+        run: |
+          ./.github/scripts/intellij_inspection.sh ${{ steps.filter.outputs.java_files }}
+          
       - name: packaging check
         run: |
           ./.github/scripts/setup_generate_license.sh
@@ -134,11 +139,6 @@ jobs:
       - name: spotbugs checks
         if: ${{ matrix.java == 'jdk8' }}
         run: ${MVN} spotbugs:check --fail-at-end -pl '!benchmarks'
-
-      - name: intellij inspections
-        if: ${{ matrix.java == 'jdk8' }}
-        run: |
-          ./.github/scripts/intellij_inspections_script.sh ${{ steps.filter.outputs.java_files }}
 
   web-checks:
     strategy:
