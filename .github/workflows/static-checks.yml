@@ -72,6 +72,7 @@ jobs:
       - name: intellij inspections
         if: ${{ matrix.java == 'jdk8' }}
         run: |
+          echo ${{ steps.filter.outputs.java_files }}
           ./.github/scripts/intellij_inspection.sh ${{ steps.filter.outputs.java_files }}
 
       - name: packaging check
