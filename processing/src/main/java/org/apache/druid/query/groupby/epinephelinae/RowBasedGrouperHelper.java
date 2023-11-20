@@ -87,6 +87,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -897,11 +898,12 @@ public class RowBasedGrouperHelper
       if (limitSpec != null && !forceDefaultOrder) {
         return objectComparatorWithAggs();
       }
+      final List<Comparator<Object>> comparators = toComparators(valueTypes);
 
       if (includeTimestamp) {
         if (sortByDimsFirst) {
           return (entry1, entry2) -> {
-            final int cmp = compareDimsInRows(entry1.getKey(), entry2.getKey(), valueTypes, 1);
+            final int cmp = compareDimsInRows(entry1.getKey(), entry2.getKey(), comparators, 1);
             if (cmp != 0) {
               return cmp;
             }
@@ -919,11 +921,11 @@ public class RowBasedGrouperHelper
               return timeCompare;
             }
 
-            return compareDimsInRows(entry1.getKey(), entry2.getKey(), valueTypes, 1);
+            return compareDimsInRows(entry1.getKey(), entry2.getKey(), comparators, 1);
           };
         }
       } else {
-        return (entry1, entry2) -> compareDimsInRows(entry1.getKey(), entry2.getKey(), valueTypes, 0);
+        return (entry1, entry2) -> compareDimsInRows(entry1.getKey(), entry2.getKey(), comparators, 0);
       }
     }
 
@@ -1035,40 +1037,14 @@ public class RowBasedGrouperHelper
     private static int compareDimsInRows(
         RowBasedKey key1,
         RowBasedKey key2,
-        final List<ColumnType> fieldTypes,
+        final List<Comparator<Object>> comparators,
         int dimStart
     )
     {
       for (int i = dimStart; i < key1.getKey().length; i++) {
-        final int cmp;
-        // sometimes doubles can become floats making the round trip from serde, make sure to coerce them both
-        // to double
-        // timestamp is not present in fieldTypes since it only includes the dimensions. sort of hacky, but if timestamp
+        // timestamp is not present in comparators since it only includes the dimensions. sort of hacky, but if timestamp
         // is included, dimstart will be 1, so subtract from 'i' to get correct index
-        if (fieldTypes.get(i - dimStart).is(ValueType.DOUBLE)) {
-          Object lhs = key1.getKey()[i];
-          Object rhs = key2.getKey()[i];
-          cmp = Comparators.<Comparable>naturalNullsFirst().compare(
-              lhs != null ? ((Number) lhs).doubleValue() : null,
-              rhs != null ? ((Number) rhs).doubleValue() : null
-          );
-        } else if (fieldTypes.get(i - dimStart).equals(ColumnType.STRING_ARRAY)) {
-          final ComparableStringArray lhs = DimensionHandlerUtils.convertToComparableStringArray(key1.getKey()[i]);
-          final ComparableStringArray rhs = DimensionHandlerUtils.convertToComparableStringArray(key2.getKey()[i]);
-          cmp = Comparators.<Comparable>naturalNullsFirst().compare(lhs, rhs);
-        } else if (fieldTypes.get(i - dimStart).equals(ColumnType.LONG_ARRAY)
-                   || fieldTypes.get(i - dimStart).equals(ColumnType.DOUBLE_ARRAY)) {
-          final ComparableList lhs = DimensionHandlerUtils.convertToList(key1.getKey()[i],
-                                                                         fieldTypes.get(i - dimStart).getElementType().getType());
-          final ComparableList rhs = DimensionHandlerUtils.convertToList(key2.getKey()[i],
-                                                                         fieldTypes.get(i - dimStart).getElementType().getType());
-          cmp = Comparators.<Comparable>naturalNullsFirst().compare(lhs, rhs);
-        } else {
-          cmp = Comparators.<Comparable>naturalNullsFirst().compare(
-              (Comparable) key1.getKey()[i],
-              (Comparable) key2.getKey()[i]
-          );
-        }
+        final int cmp = comparators.get(i - dimStart).compare(key1.getKey()[i], key2.getKey()[i]);
         if (cmp != 0) {
           return cmp;
         }
@@ -1158,6 +1134,55 @@ public class RowBasedGrouperHelper
 
       return 0;
     }
+
+    private static List<Comparator<Object>> toComparators(List<ColumnType> fieldTypes)
+    {
+      List<Comparator<Object>> comparators = new ArrayList<>(fieldTypes.size());
+      for (ColumnType fieldType : fieldTypes) {
+        if (fieldType.is(ValueType.DOUBLE)) {
+          comparators.add(RowBasedKeySerdeFactory::compareDoubles);
+        } else if (fieldType.equals(ColumnType.STRING_ARRAY)) {
+          comparators.add(RowBasedKeySerdeFactory::compareStringArrays);
+        } else if (fieldType.equals(ColumnType.LONG_ARRAY)
+                   || fieldType.equals(ColumnType.DOUBLE_ARRAY)) {
+          ValueType elementType = fieldType.getElementType().getType();
+          comparators.add((lhs, rhs) -> compareNumberArrays(lhs, rhs, elementType));
+        } else {
+          comparators.add(RowBasedKeySerdeFactory::compareComparables);
+        }
+      }
+      return comparators;
+    }
+
+    private static int compareDoubles(@Nullable Object lhs, @Nullable Object rhs)
+    {
+      // sometimes doubles can become floats making the round trip from serde, make sure to coerce them both
+      // to double
+      return Comparators.<Comparable>naturalNullsFirst().compare(
+          lhs != null ? ((Number) lhs).doubleValue() : null,
+          rhs != null ? ((Number) rhs).doubleValue() : null
+      );
+    }
+
+    private static int compareStringArrays(Object lhs, Object rhs)
+    {
+      final ComparableStringArray lhsComparable = DimensionHandlerUtils.convertToComparableStringArray(lhs);
+      final ComparableStringArray rhsComparable = DimensionHandlerUtils.convertToComparableStringArray(rhs);
+      return Comparators.<Comparable>naturalNullsFirst().compare(lhsComparable, rhsComparable);
+    }
+
+    private static int compareNumberArrays(Object lhs, Object rhs, ValueType elementType)
+    {
+      final ComparableList lhsComparable = DimensionHandlerUtils.convertToList(lhs, elementType);
+      final ComparableList rhsComparable = DimensionHandlerUtils.convertToList(rhs, elementType);
+      return Comparators.<Comparable>naturalNullsFirst().compare(lhsComparable, rhsComparable);
+    }
+
+    private static int compareComparables(Object lhs, Object rhs)
+    {
+      return Comparators.<Comparable>naturalNullsFirst().compare((Comparable) lhs, (Comparable) rhs);
+    }
+
   }
 
   static long estimateStringKeySize(@Nullable String key)
