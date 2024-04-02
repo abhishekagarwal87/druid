@@ -68,7 +68,7 @@ public class AutoTypeColumnIndexerTest extends InitializedNullHandlingTest
   @Test
   public void testKeySizeEstimation()
   {
-    AutoTypeColumnIndexer indexer = new AutoTypeColumnIndexer("test", null);
+    AutoTypeColumnIndexer indexer = new AutoTypeColumnIndexerV1("test", null);
     int baseCardinality = NullHandling.sqlCompatible() ? 0 : 2;
     Assert.assertEquals(baseCardinality, indexer.getCardinality());
 
@@ -601,7 +601,11 @@ public class AutoTypeColumnIndexerTest extends InitializedNullHandlingTest
                 Granularities.NONE,
                 VirtualColumns.EMPTY,
                 DimensionsSpec.builder()
-                              .setDimensions(ImmutableList.of(new AutoTypeColumnSchema(NESTED_COL, ColumnType.STRING)))
+                              .setDimensions(ImmutableList.of(new AutoTypeColumnSchema(
+                                  NESTED_COL,
+                                  ColumnType.STRING,
+                                  AutoTypeColumnSchema.VERSION_1
+                              )))
                               .useSchemaDiscovery(true)
                               .build(),
                 new AggregatorFactory[0],
@@ -668,7 +672,7 @@ public class AutoTypeColumnIndexerTest extends InitializedNullHandlingTest
   public void testConstantNull()
   {
     int baseCardinality = NullHandling.sqlCompatible() ? 0 : 2;
-    AutoTypeColumnIndexer indexer = new AutoTypeColumnIndexer("test", null);
+    AutoTypeColumnIndexer indexer = new AutoTypeColumnIndexerV1("test", null);
     EncodedKeyComponent<StructuredData> key;
 
     key = indexer.processRowValsToUnsortedEncodedKeyComponent(null, true);
@@ -693,7 +697,7 @@ public class AutoTypeColumnIndexerTest extends InitializedNullHandlingTest
   public void testConstantString()
   {
     int baseCardinality = NullHandling.sqlCompatible() ? 0 : 2;
-    AutoTypeColumnIndexer indexer = new AutoTypeColumnIndexer("test", null);
+    AutoTypeColumnIndexer indexer = new AutoTypeColumnIndexerV1("test", null);
     EncodedKeyComponent<StructuredData> key;
 
     key = indexer.processRowValsToUnsortedEncodedKeyComponent("abcd", true);
@@ -717,7 +721,7 @@ public class AutoTypeColumnIndexerTest extends InitializedNullHandlingTest
   public void testConstantLong()
   {
     int baseCardinality = NullHandling.sqlCompatible() ? 0 : 2;
-    AutoTypeColumnIndexer indexer = new AutoTypeColumnIndexer("test", null);
+    AutoTypeColumnIndexer indexer = new AutoTypeColumnIndexerV1("test", null);
     EncodedKeyComponent<StructuredData> key;
 
     key = indexer.processRowValsToUnsortedEncodedKeyComponent(1234L, true);
@@ -741,7 +745,7 @@ public class AutoTypeColumnIndexerTest extends InitializedNullHandlingTest
   public void testConstantEmptyArray()
   {
     int baseCardinality = NullHandling.sqlCompatible() ? 0 : 2;
-    AutoTypeColumnIndexer indexer = new AutoTypeColumnIndexer("test", null);
+    AutoTypeColumnIndexer indexer = new AutoTypeColumnIndexerV1("test", null);
     EncodedKeyComponent<StructuredData> key;
 
     key = indexer.processRowValsToUnsortedEncodedKeyComponent(ImmutableList.of(), true);
@@ -765,7 +769,7 @@ public class AutoTypeColumnIndexerTest extends InitializedNullHandlingTest
   public void testConstantArray()
   {
     int baseCardinality = NullHandling.sqlCompatible() ? 0 : 2;
-    AutoTypeColumnIndexer indexer = new AutoTypeColumnIndexer("test", null);
+    AutoTypeColumnIndexer indexer = new AutoTypeColumnIndexerV1("test", null);
     EncodedKeyComponent<StructuredData> key;
 
     key = indexer.processRowValsToUnsortedEncodedKeyComponent(ImmutableList.of(1L, 2L, 3L), true);
@@ -789,7 +793,7 @@ public class AutoTypeColumnIndexerTest extends InitializedNullHandlingTest
   public void testConstantEmptyObject()
   {
     int baseCardinality = NullHandling.sqlCompatible() ? 0 : 2;
-    AutoTypeColumnIndexer indexer = new AutoTypeColumnIndexer("test", null);
+    AutoTypeColumnIndexer indexer = new AutoTypeColumnIndexerV1("test", null);
     EncodedKeyComponent<StructuredData> key;
 
     key = indexer.processRowValsToUnsortedEncodedKeyComponent(ImmutableMap.of(), true);

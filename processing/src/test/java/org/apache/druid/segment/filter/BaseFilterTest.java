@@ -184,11 +184,11 @@ public abstract class BaseFilterTest extends InitializedNullHandlingTest
                    .add(new DoubleDimensionSchema("d0"))
                    .add(new FloatDimensionSchema("f0"))
                    .add(new LongDimensionSchema("l0"))
-                   .add(new AutoTypeColumnSchema("arrayString", ColumnType.STRING_ARRAY))
-                   .add(new AutoTypeColumnSchema("arrayLong", ColumnType.LONG_ARRAY))
-                   .add(new AutoTypeColumnSchema("arrayDouble", ColumnType.DOUBLE_ARRAY))
-                   .add(new AutoTypeColumnSchema("variant", null))
-                   .add(new AutoTypeColumnSchema("nested", null))
+                   .add(new AutoTypeColumnSchema("arrayString", ColumnType.STRING_ARRAY, AutoTypeColumnSchema.VERSION_1))
+                   .add(new AutoTypeColumnSchema("arrayLong", ColumnType.LONG_ARRAY, AutoTypeColumnSchema.VERSION_1))
+                   .add(new AutoTypeColumnSchema("arrayDouble", ColumnType.DOUBLE_ARRAY, AutoTypeColumnSchema.VERSION_1))
+                   .add(new AutoTypeColumnSchema("variant", null, AutoTypeColumnSchema.VERSION_1))
+                   .add(new AutoTypeColumnSchema("nested", null, AutoTypeColumnSchema.VERSION_1))
                    .build()
   );
 
@@ -522,7 +522,11 @@ public abstract class BaseFilterTest extends InitializedNullHandlingTest
                                                 .getDimensions()
                                                 .stream()
                                                 .map(
-                                                    dimensionSchema -> new AutoTypeColumnSchema(dimensionSchema.getName(), null)
+                                                    dimensionSchema -> new AutoTypeColumnSchema(
+                                                        dimensionSchema.getName(),
+                                                        null,
+                                                        AutoTypeColumnSchema.VERSION_1
+                                                    )
                                                 )
                                                 .collect(Collectors.toList())
                                       ),
@@ -550,7 +554,11 @@ public abstract class BaseFilterTest extends InitializedNullHandlingTest
                                                 .getDimensions()
                                                 .stream()
                                                 .map(
-                                                    dimensionSchema -> new AutoTypeColumnSchema(dimensionSchema.getName(), null)
+                                                    dimensionSchema -> new AutoTypeColumnSchema(
+                                                        dimensionSchema.getName(),
+                                                        null,
+                                                        AutoTypeColumnSchema.VERSION_1
+                                                    )
                                                 )
                                                 .collect(Collectors.toList())
                                       ),
@@ -579,7 +587,11 @@ public abstract class BaseFilterTest extends InitializedNullHandlingTest
                                                         .getDimensions()
                                                         .stream()
                                                         .map(
-                                                            dimensionSchema -> new AutoTypeColumnSchema(dimensionSchema.getName(), null)
+                                                            dimensionSchema -> new AutoTypeColumnSchema(
+                                                                dimensionSchema.getName(),
+                                                                null,
+                                                                AutoTypeColumnSchema.VERSION_1
+                                                            )
                                                         )
                                                         .collect(Collectors.toList())
                                               ),

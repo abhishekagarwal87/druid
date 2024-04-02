@@ -69,7 +69,8 @@ public abstract class DimensionSchema
         return new DoubleDimensionSchema(name);
       default:
         // the auto column indexer can handle any type
-        return new AutoTypeColumnSchema(name, null);
+        // TODO - so the default is 1?
+        return new AutoTypeColumnSchema(name, null, AutoTypeColumnSchema.VERSION_1);
     }
   }
 

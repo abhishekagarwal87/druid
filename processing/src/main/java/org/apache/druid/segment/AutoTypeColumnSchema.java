@@ -22,7 +22,10 @@ package org.apache.druid.segment;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.google.common.annotations.VisibleForTesting;
 import org.apache.druid.data.input.impl.DimensionSchema;
+import org.apache.druid.error.DruidException;
+import org.apache.druid.error.InvalidInput;
 import org.apache.druid.segment.column.ColumnType;
 import org.apache.druid.segment.nested.NestedCommonFormatColumn;
 import org.apache.druid.segment.nested.NestedCommonFormatColumnSerializer;
@@ -65,14 +68,25 @@ import java.util.Objects;
 public class AutoTypeColumnSchema extends DimensionSchema
 {
   public static final String TYPE = "auto";
+  public static final int VERSION_1 = 1;
+  public static final int VERSION_2 = 2;
 
   @Nullable
   private final ColumnType castToType;
 
+  private final int version;
+
+  @VisibleForTesting
+  public AutoTypeColumnSchema(String name, @Nullable ColumnType castToType)
+  {
+    this(name, castToType, null);
+  }
+
   @JsonCreator
   public AutoTypeColumnSchema(
       @JsonProperty("name") String name,
-      @JsonProperty("castToType") @Nullable ColumnType castToType
+      @JsonProperty("castToType") @Nullable ColumnType castToType,
+      @JsonProperty("version") @Nullable Integer version
   )
   {
     super(name, null, true);
@@ -83,6 +97,15 @@ public class AutoTypeColumnSchema extends DimensionSchema
       this.castToType = ColumnType.DOUBLE_ARRAY;
     } else {
       this.castToType = castToType;
+    }
+    if (null == version) {
+      this.version = VERSION_1;
+    } else  {
+      this.version = version;
+    }
+
+    if (this.version != VERSION_1 && this.version != VERSION_2) {
+      throw InvalidInput.exception("Invalid version: [%s]", version);
     }
   }
 
@@ -106,10 +129,16 @@ public class AutoTypeColumnSchema extends DimensionSchema
     return castToType;
   }
 
+  @JsonProperty
+  public int getVersion()
+  {
+    return version;
+  }
+
   @Override
   public DimensionHandler<StructuredData, StructuredData, StructuredData> getDimensionHandler()
   {
-    return new NestedCommonFormatColumnHandler(getName(), castToType);
+    return new NestedCommonFormatColumnHandler(getName(), castToType, version);
   }
 
   @Override
@@ -125,13 +154,13 @@ public class AutoTypeColumnSchema extends DimensionSchema
       return false;
     }
     AutoTypeColumnSchema that = (AutoTypeColumnSchema) o;
-    return Objects.equals(castToType, that.castToType);
+    return Objects.equals(castToType, that.castToType) && version == that.version;
   }
 
   @Override
   public int hashCode()
   {
-    return Objects.hash(super.hashCode(), castToType);
+    return Objects.hash(super.hashCode(), castToType, version);
   }
 
   @Override
@@ -144,6 +173,7 @@ public class AutoTypeColumnSchema extends DimensionSchema
            ", multiValueHandling=" + getMultiValueHandling() +
            ", createBitmapIndex=" + hasBitmapIndex() +
            ", castToType=" + castToType +
+           ", version=" + version +
            '}';
   }
 }

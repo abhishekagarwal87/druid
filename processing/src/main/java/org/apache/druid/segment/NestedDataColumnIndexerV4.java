@@ -263,6 +263,7 @@ public class NestedDataColumnIndexerV4 implements DimensionIndexer<StructuredDat
     return globalDictionary.getSortedCollector();
   }
 
+
   public SortedMap<String, FieldTypeInfo.MutableTypeSet> getFieldTypeInfo()
   {
     TreeMap<String, FieldTypeInfo.MutableTypeSet> fields = new TreeMap<>();

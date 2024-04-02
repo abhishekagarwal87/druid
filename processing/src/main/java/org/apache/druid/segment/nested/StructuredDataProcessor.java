@@ -258,6 +258,16 @@ public abstract class StructuredDataProcessor
       return literalFields;
     }
 
+    public String[] getLiteralFieldsAsPathArray()
+    {
+      String[] stringArray = new String[literalFields.size()];
+      int index = 0;
+      for (ArrayList<NestedPathPart> field : literalFields) {
+        stringArray[index++] = NestedPathFinder.toNormalizedJsonPath(field);
+      }
+      return stringArray;
+    }
+
     /**
      * Estimated size in bytes of the data processed
      */

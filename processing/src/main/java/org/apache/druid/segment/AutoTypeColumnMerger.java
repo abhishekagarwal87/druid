@@ -84,13 +84,15 @@ public class AutoTypeColumnMerger implements DimensionMergerV9
   @Nullable
   private final ColumnType castToType;
   private boolean isVariantType = false;
+  private final int version;
 
   public AutoTypeColumnMerger(
       String name,
       @Nullable ColumnType castToType,
       IndexSpec indexSpec,
       SegmentWriteOutMedium segmentWriteOutMedium,
-      Closer closer
+      Closer closer,
+      int version
   )
   {
 
@@ -99,6 +101,7 @@ public class AutoTypeColumnMerger implements DimensionMergerV9
     this.indexSpec = indexSpec;
     this.segmentWriteOutMedium = segmentWriteOutMedium;
     this.closer = closer;
+    this.version = version;
   }
 
   @Override
@@ -244,7 +247,8 @@ public class AutoTypeColumnMerger implements DimensionMergerV9
             name,
             indexSpec,
             segmentWriteOutMedium,
-            closer
+            closer,
+            version
         );
       }
 

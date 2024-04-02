@@ -20,12 +20,14 @@
 package org.apache.druid.segment;
 
 import org.apache.druid.data.input.impl.DimensionSchema;
+import org.apache.druid.error.DruidException;
 import org.apache.druid.java.util.common.io.Closer;
 import org.apache.druid.query.dimension.DefaultDimensionSpec;
 import org.apache.druid.query.dimension.DimensionSpec;
 import org.apache.druid.segment.column.ColumnCapabilities;
 import org.apache.druid.segment.column.ColumnType;
 import org.apache.druid.segment.nested.StructuredData;
+import org.apache.druid.segment.nested.auto.v2.AutoTypeColumnIndexerV2;
 import org.apache.druid.segment.selector.settable.SettableColumnValueSelector;
 import org.apache.druid.segment.selector.settable.SettableObjectColumnValueSelector;
 import org.apache.druid.segment.writeout.SegmentWriteOutMedium;
@@ -45,10 +47,17 @@ public class NestedCommonFormatColumnHandler implements DimensionHandler<Structu
   @Nullable
   private final ColumnType castTo;
 
-  public NestedCommonFormatColumnHandler(String name, @Nullable ColumnType castTo)
+  private final int version;
+
+  public NestedCommonFormatColumnHandler(String name, @Nullable ColumnType castTo, @Nullable Integer version)
   {
     this.name = name;
     this.castTo = castTo;
+    if (version == null) {
+      this.version = AutoTypeColumnSchema.VERSION_1;
+    } else {
+      this.version = version;
+    }
   }
 
   @Override
@@ -66,13 +75,19 @@ public class NestedCommonFormatColumnHandler implements DimensionHandler<Structu
   @Override
   public DimensionSchema getDimensionSchema(ColumnCapabilities capabilities)
   {
-    return new AutoTypeColumnSchema(name, castTo);
+    return new AutoTypeColumnSchema(name, castTo, version);
   }
 
   @Override
   public DimensionIndexer<StructuredData, StructuredData, StructuredData> makeIndexer(boolean useMaxMemoryEstimates)
   {
-    return new AutoTypeColumnIndexer(name, castTo);
+    if (version == AutoTypeColumnSchema.VERSION_1) {
+      return new AutoTypeColumnIndexerV1(name, castTo);
+    } else if (version == AutoTypeColumnSchema.VERSION_2) {
+      return new AutoTypeColumnIndexerV2(name, castTo);
+    } else {
+      throw DruidException.defensive("Invalid version: [%s]", version);
+    }
   }
 
   @Override
@@ -84,7 +99,7 @@ public class NestedCommonFormatColumnHandler implements DimensionHandler<Structu
       Closer closer
   )
   {
-    return new AutoTypeColumnMerger(name, castTo, indexSpec, segmentWriteOutMedium, closer);
+    return new AutoTypeColumnMerger(name, castTo, indexSpec, segmentWriteOutMedium, closer, version);
   }
 
   @Override

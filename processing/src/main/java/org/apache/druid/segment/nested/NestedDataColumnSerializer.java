@@ -24,6 +24,7 @@ import com.google.common.collect.Maps;
 import org.apache.druid.collections.bitmap.ImmutableBitmap;
 import org.apache.druid.collections.bitmap.MutableBitmap;
 import org.apache.druid.common.config.NullHandling;
+import org.apache.druid.error.DruidException;
 import org.apache.druid.java.util.common.FileUtils;
 import org.apache.druid.java.util.common.ISE;
 import org.apache.druid.java.util.common.RE;
@@ -33,6 +34,7 @@ import org.apache.druid.java.util.common.io.smoosh.SmooshedFileMapper;
 import org.apache.druid.java.util.common.io.smoosh.SmooshedWriter;
 import org.apache.druid.java.util.common.logger.Logger;
 import org.apache.druid.math.expr.ExprEval;
+import org.apache.druid.segment.AutoTypeColumnSchema;
 import org.apache.druid.segment.ColumnValueSelector;
 import org.apache.druid.segment.IndexMerger;
 import org.apache.druid.segment.IndexSpec;
@@ -88,6 +90,8 @@ public class NestedDataColumnSerializer extends NestedCommonFormatColumnSerializ
   private final IndexSpec indexSpec;
   @SuppressWarnings("unused")
   private final Closer closer;
+
+  private final int version;
 
   private final StructuredDataProcessor fieldProcessor = new StructuredDataProcessor()
   {
@@ -152,6 +156,7 @@ public class NestedDataColumnSerializer extends NestedCommonFormatColumnSerializ
   private FixedIndexedWriter<Double> doubleDictionaryWriter;
   private FrontCodedIntArrayIndexedWriter arrayDictionaryWriter;
   private CompressedVariableSizedBlobColumnSerializer rawWriter;
+  private GlobalDictionaryEncodedFieldColumnWriter<int[]> structFieldWriter;
   private ByteBufferWriter<ImmutableBitmap> nullBitmapWriter;
   private MutableBitmap nullRowsBitmap;
   private Map<String, GlobalDictionaryEncodedFieldColumnWriter<?>> fieldWriters;
@@ -165,13 +170,15 @@ public class NestedDataColumnSerializer extends NestedCommonFormatColumnSerializ
       String name,
       IndexSpec indexSpec,
       SegmentWriteOutMedium segmentWriteOutMedium,
-      Closer closer
+      Closer closer,
+      int version
   )
   {
     this.name = name;
     this.segmentWriteOutMedium = segmentWriteOutMedium;
     this.indexSpec = indexSpec;
     this.closer = closer;
+    this.version = version;
   }
 
   @Override
@@ -242,17 +249,30 @@ public class NestedDataColumnSerializer extends NestedCommonFormatColumnSerializ
             arrayDictionaryWriter
         )
     );
+
+    if (version == AutoTypeColumnSchema.VERSION_2) {
+      structFieldWriter = new VariantArrayFieldColumnWriter(
+          name,
+          "__struct",
+          segmentWriteOutMedium,
+          indexSpec,
+          globalDictionaryIdLookup
+      );
+      structFieldWriter.open();
+    }
   }
 
   @Override
   public void open() throws IOException
   {
-    rawWriter = new CompressedVariableSizedBlobColumnSerializer(
-        getInternalFileName(name, RAW_FILE_NAME),
-        segmentWriteOutMedium,
-        indexSpec.getJsonCompression() != null ? indexSpec.getJsonCompression() : CompressionStrategy.LZ4
-    );
-    rawWriter.open();
+    if (version == AutoTypeColumnSchema.VERSION_1) {
+      rawWriter = new CompressedVariableSizedBlobColumnSerializer(
+          getInternalFileName(name, RAW_FILE_NAME),
+          segmentWriteOutMedium,
+          indexSpec.getJsonCompression() != null ? indexSpec.getJsonCompression() : CompressionStrategy.LZ4
+      );
+      rawWriter.open();
+    }
 
     nullBitmapWriter = new ByteBufferWriter<>(
         segmentWriteOutMedium,
@@ -383,10 +403,17 @@ public class NestedDataColumnSerializer extends NestedCommonFormatColumnSerializ
     if (data == null) {
       nullRowsBitmap.add(rowCount);
     }
-    rawWriter.addValue(NestedDataComplexTypeSerde.INSTANCE.toBytes(data));
-    if (data != null) {
-      fieldProcessor.processFields(data.getValue());
+    if (version == AutoTypeColumnSchema.VERSION_1) {
+      rawWriter.addValue(NestedDataComplexTypeSerde.INSTANCE.toBytes(data));
     }
+
+    if (data != null) {
+      StructuredDataProcessor.ProcessResults processResults = fieldProcessor.processFields(data.getValue());
+      if (version == AutoTypeColumnSchema.VERSION_2) {
+        structFieldWriter.addValue(rowCount, processResults.getLiteralFieldsAsPathArray());
+      }
+    }
+
     rowCount++;
   }
 
@@ -436,7 +463,14 @@ public class NestedDataColumnSerializer extends NestedCommonFormatColumnSerializ
     Preconditions.checkState(closedForWrite, "Not closed yet!");
     Preconditions.checkArgument(dictionaryWriter.isSorted(), "Dictionary not sorted?!?");
 
-    writeV0Header(channel, columnNameBytes);
+    if (version == AutoTypeColumnSchema.VERSION_1) {
+      writeV0Header(channel, columnNameBytes);
+    } else if (version == AutoTypeColumnSchema.VERSION_2) {
+      writeV1Header(channel, columnNameBytes);
+    } else {
+      throw DruidException.defensive("Invalid version: [%s]", version);
+    }
+
     fieldsWriter.writeTo(channel, smoosher);
     fieldsInfoWriter.writeTo(channel, smoosher);
 
@@ -464,7 +498,9 @@ public class NestedDataColumnSerializer extends NestedCommonFormatColumnSerializ
     } else {
       writeInternal(smoosher, arrayDictionaryWriter, ARRAY_DICTIONARY_FILE_NAME);
     }
-    writeInternal(smoosher, rawWriter, RAW_FILE_NAME);
+    if (version == AutoTypeColumnSchema.VERSION_1) {
+      writeInternal(smoosher, rawWriter, RAW_FILE_NAME);
+    }
     if (!nullRowsBitmap.isEmpty()) {
       writeInternal(smoosher, nullBitmapWriter, NULL_BITMAP_FILE_NAME);
     }
@@ -478,7 +514,9 @@ public class NestedDataColumnSerializer extends NestedCommonFormatColumnSerializ
     if (channel instanceof SmooshedWriter) {
       channel.close();
     }
-
+    if (version == AutoTypeColumnSchema.VERSION_2) {
+      structFieldWriter.writeTo(rowCount, smoosher);
+    }
     for (Map.Entry<String, FieldTypeInfo.MutableTypeSet> field : fields.entrySet()) {
       // remove writer so that it can be collected when we are done with it
       GlobalDictionaryEncodedFieldColumnWriter<?> writer = fieldWriters.remove(field.getKey());

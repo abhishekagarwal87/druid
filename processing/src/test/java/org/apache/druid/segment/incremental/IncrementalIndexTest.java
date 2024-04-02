@@ -79,11 +79,11 @@ public class IncrementalIndexTest extends InitializedNullHandlingTest
             new DoubleDimensionSchema("double"),
             new StringDimensionSchema("bool_string"),
             new LongDimensionSchema("bool_long"),
-            new AutoTypeColumnSchema("bool_auto", null),
-            new AutoTypeColumnSchema("array_string", ColumnType.STRING_ARRAY),
-            new AutoTypeColumnSchema("array_double", ColumnType.DOUBLE_ARRAY),
-            new AutoTypeColumnSchema("array_long", ColumnType.LONG_ARRAY),
-            new AutoTypeColumnSchema("nested", null)
+            new AutoTypeColumnSchema("bool_auto", null, AutoTypeColumnSchema.VERSION_1),
+            new AutoTypeColumnSchema("array_string", ColumnType.STRING_ARRAY, AutoTypeColumnSchema.VERSION_1),
+            new AutoTypeColumnSchema("array_double", ColumnType.DOUBLE_ARRAY, AutoTypeColumnSchema.VERSION_1),
+            new AutoTypeColumnSchema("array_long", ColumnType.LONG_ARRAY, AutoTypeColumnSchema.VERSION_1),
+            new AutoTypeColumnSchema("nested", null, AutoTypeColumnSchema.VERSION_1)
         )
     );
     AggregatorFactory[] metrics = {

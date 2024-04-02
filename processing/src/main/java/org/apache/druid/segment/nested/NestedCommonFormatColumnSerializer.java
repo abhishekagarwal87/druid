@@ -50,6 +50,7 @@ import java.util.SortedMap;
 public abstract class NestedCommonFormatColumnSerializer implements GenericColumnSerializer<StructuredData>
 {
   public static final byte V0 = 0x00;
+  public static final byte V1 = 0x01;
   public static final String STRING_DICTIONARY_FILE_NAME = "__stringDictionary";
   public static final String LONG_DICTIONARY_FILE_NAME = "__longDictionary";
   public static final String DOUBLE_DICTIONARY_FILE_NAME = "__doubleDictionary";
@@ -103,6 +104,12 @@ public abstract class NestedCommonFormatColumnSerializer implements GenericColum
   protected void writeV0Header(WritableByteChannel channel, ByteBuffer columnNameBuffer) throws IOException
   {
     channel.write(ByteBuffer.wrap(new byte[]{NestedCommonFormatColumnSerializer.V0}));
+    channel.write(columnNameBuffer);
+  }
+
+  protected void writeV1Header(WritableByteChannel channel, ByteBuffer columnNameBuffer) throws IOException
+  {
+    channel.write(ByteBuffer.wrap(new byte[]{NestedCommonFormatColumnSerializer.V1}));
     channel.write(columnNameBuffer);
   }
 

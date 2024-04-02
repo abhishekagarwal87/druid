@@ -61,7 +61,7 @@ public class NestedDataColumnSupplier implements Supplier<NestedCommonFormatColu
     final int columnNameLength = VByte.readInt(bb);
     final String columnName = StringUtils.fromUtf8(bb, columnNameLength);
 
-    if (version == NestedCommonFormatColumnSerializer.V0) {
+    if (version == NestedCommonFormatColumnSerializer.V0 || version == NestedCommonFormatColumnSerializer.V1) {
       try {
         final SmooshedFileMapper mapper = columnBuilder.getFileMapper();
         final GenericIndexed<String> fields;
@@ -119,20 +119,6 @@ public class NestedDataColumnSupplier implements Supplier<NestedCommonFormatColu
             arrayDictionarybuffer,
             byteOrder
         );
-        final ByteBuffer rawBuffer = NestedCommonFormatColumnPartSerde.loadInternalFile(
-            mapper,
-            columnName,
-            NestedCommonFormatColumnSerializer.RAW_FILE_NAME
-        );
-        compressedRawColumnSupplier = CompressedVariableSizedBlobColumnSupplier.fromByteBuffer(
-            NestedCommonFormatColumnSerializer.getInternalFileName(
-                columnName,
-                NestedCommonFormatColumnSerializer.RAW_FILE_NAME
-            ),
-            rawBuffer,
-            byteOrder,
-            mapper
-        );
         if (hasNulls) {
           columnBuilder.setHasNulls(true);
           final ByteBuffer nullIndexBuffer = NestedCommonFormatColumnPartSerde.loadInternalFile(
@@ -143,6 +129,25 @@ public class NestedDataColumnSupplier implements Supplier<NestedCommonFormatColu
           nullValues = bitmapSerdeFactory.getObjectStrategy().fromByteBufferWithSize(nullIndexBuffer);
         } else {
           nullValues = bitmapSerdeFactory.getBitmapFactory().makeEmptyImmutableBitmap();
+        }
+
+        if (version == NestedCommonFormatColumnSerializer.V0) {
+          final ByteBuffer rawBuffer = NestedCommonFormatColumnPartSerde.loadInternalFile(
+              mapper,
+              columnName,
+              NestedCommonFormatColumnSerializer.RAW_FILE_NAME
+          );
+          compressedRawColumnSupplier = CompressedVariableSizedBlobColumnSupplier.fromByteBuffer(
+              NestedCommonFormatColumnSerializer.getInternalFileName(
+                  columnName,
+                  NestedCommonFormatColumnSerializer.RAW_FILE_NAME
+              ),
+              rawBuffer,
+              byteOrder,
+              mapper
+          );
+        } else {
+          compressedRawColumnSupplier = null;
         }
 
         return new NestedDataColumnSupplier(
@@ -159,7 +164,8 @@ public class NestedDataColumnSupplier implements Supplier<NestedCommonFormatColu
             mapper,
             bitmapSerdeFactory,
             byteOrder,
-            logicalType
+            logicalType,
+            version
         );
       }
       catch (IOException ex) {
@@ -187,6 +193,8 @@ public class NestedDataColumnSupplier implements Supplier<NestedCommonFormatColu
   @Nullable
   private final ColumnType simpleType;
 
+  private final int version;
+
   private NestedDataColumnSupplier(
       String columnName,
       GenericIndexed<String> fields,
@@ -201,7 +209,8 @@ public class NestedDataColumnSupplier implements Supplier<NestedCommonFormatColu
       SmooshedFileMapper fileMapper,
       BitmapSerdeFactory bitmapSerdeFactory,
       ByteOrder byteOrder,
-      @Nullable ColumnType simpleType
+      @Nullable ColumnType simpleType,
+      int version
   )
   {
     this.columnName = columnName;
@@ -218,6 +227,7 @@ public class NestedDataColumnSupplier implements Supplier<NestedCommonFormatColu
     this.bitmapSerdeFactory = bitmapSerdeFactory;
     this.byteOrder = byteOrder;
     this.simpleType = simpleType;
+    this.version = version;
   }
 
   @Override
@@ -244,6 +254,11 @@ public class NestedDataColumnSupplier implements Supplier<NestedCommonFormatColu
   public ColumnType getLogicalType()
   {
     return simpleType == null ? ColumnType.NESTED_DATA : simpleType;
+  }
+
+  public int getVersion()
+  {
+    return version;
   }
 
   @Nullable

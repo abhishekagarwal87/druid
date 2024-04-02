@@ -59,7 +59,7 @@ import java.util.Objects;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
-public class AutoTypeColumnIndexer implements DimensionIndexer<StructuredData, StructuredData, StructuredData>
+public abstract class AutoTypeColumnIndexer implements DimensionIndexer<StructuredData, StructuredData, StructuredData>
 {
   /**
    * have we seen any null values?
@@ -189,7 +189,7 @@ public class AutoTypeColumnIndexer implements DimensionIndexer<StructuredData, S
     // 'raw' data
     effectiveSizeBytes += (globalDictionary.sizeInBytes() - oldDictSizeInBytes);
     effectiveSizeBytes += (estimatedFieldKeySize - oldFieldKeySize);
-    return new EncodedKeyComponent<>(StructuredData.wrap(eval.value()), effectiveSizeBytes);
+    return new EncodedKeyComponent<>(processRawValue(null, eval.value()), effectiveSizeBytes);
   }
 
   /**
@@ -222,8 +222,12 @@ public class AutoTypeColumnIndexer implements DimensionIndexer<StructuredData, S
     // 'raw' data
     effectiveSizeBytes += (globalDictionary.sizeInBytes() - oldDictSizeInBytes);
     effectiveSizeBytes += (estimatedFieldKeySize - oldFieldKeySize);
-    return new EncodedKeyComponent<>(data, effectiveSizeBytes);
+    return new EncodedKeyComponent<>(processRawValue(info, data), effectiveSizeBytes);
   }
+
+  protected abstract StructuredData processRawValue(@Nullable StructuredDataProcessor.ProcessResults info, @Nullable Object value);
+
+  public abstract int getVersion();
 
   @Override
   public void setSparseIndexed()
@@ -443,7 +447,7 @@ public class AutoTypeColumnIndexer implements DimensionIndexer<StructuredData, S
   @Override
   public ColumnFormat getFormat()
   {
-    return new Format(getLogicalType(), hasNulls, castToType != null);
+    return new Format(getLogicalType(), hasNulls, castToType != null, getVersion());
   }
 
   @Override
@@ -730,11 +734,15 @@ public class AutoTypeColumnIndexer implements DimensionIndexer<StructuredData, S
     private final boolean hasNulls;
     private final boolean enforceLogicalType;
 
-    Format(ColumnType logicalType, boolean hasNulls, boolean enforceLogicalType)
+    //TODO - think about mixed versions data
+    private final int version;
+
+    Format(ColumnType logicalType, boolean hasNulls, boolean enforceLogicalType, int version)
     {
       this.logicalType = logicalType;
       this.hasNulls = hasNulls;
       this.enforceLogicalType = enforceLogicalType;
+      this.version = version;
     }
 
     @Override
@@ -746,13 +754,13 @@ public class AutoTypeColumnIndexer implements DimensionIndexer<StructuredData, S
     @Override
     public DimensionHandler getColumnHandler(String columnName)
     {
-      return new NestedCommonFormatColumnHandler(columnName, enforceLogicalType ? logicalType : null);
+      return new NestedCommonFormatColumnHandler(columnName, enforceLogicalType ? logicalType : null, version);
     }
 
     @Override
     public DimensionSchema getColumnSchema(String columnName)
     {
-      return new AutoTypeColumnSchema(columnName, enforceLogicalType ? logicalType : null);
+      return new AutoTypeColumnSchema(columnName, enforceLogicalType ? logicalType : null, version);
     }
 
     @Override
@@ -761,15 +769,19 @@ public class AutoTypeColumnIndexer implements DimensionIndexer<StructuredData, S
       if (otherFormat == null) {
         return this;
       }
+
       if (otherFormat instanceof Format) {
         final Format other = (Format) otherFormat;
-        if (!getLogicalType().equals(other.getLogicalType())) {
-          return new Format(ColumnType.NESTED_DATA, hasNulls || other.hasNulls, false);
+        if (version != other.version) {
+          throw new ISE("Cannot merge columns of different versions[%s] and [%s]", version, other.version);
         }
-        return new Format(logicalType, hasNulls || other.hasNulls, enforceLogicalType || other.enforceLogicalType);
+        if (!getLogicalType().equals(other.getLogicalType())) {
+          return new Format(logicalType, hasNulls || other.hasNulls, false, version);
+        }
+        return new Format(logicalType, hasNulls || other.hasNulls, this.enforceLogicalType || other.enforceLogicalType, version);
       }
       throw new ISE(
-          "Cannot merge columns of type[%s] and format[%s] and with [%s] and [%s]",
+          "Cannot merge columns of type[%s] and format[%s:%s] and with [%s] and [%s:%s]",
           logicalType,
           this.getClass().getName(),
           otherFormat.getLogicalType(),

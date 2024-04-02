@@ -105,12 +105,12 @@ public class NestedDataTestUtils
       DimensionsSpec.builder()
                     .setDimensions(
                         Arrays.asList(
-                            new AutoTypeColumnSchema("dim", null),
-                            new AutoTypeColumnSchema("nest_json", null),
-                            new AutoTypeColumnSchema("nester_json", null),
-                            new AutoTypeColumnSchema("variant_json", null),
-                            new AutoTypeColumnSchema("list_json", null),
-                            new AutoTypeColumnSchema("nonexistent", null)
+                            new AutoTypeColumnSchema("dim", null, AutoTypeColumnSchema.VERSION_1),
+                            new AutoTypeColumnSchema("nest_json", null, AutoTypeColumnSchema.VERSION_1),
+                            new AutoTypeColumnSchema("nester_json", null, AutoTypeColumnSchema.VERSION_1),
+                            new AutoTypeColumnSchema("variant_json", null, AutoTypeColumnSchema.VERSION_1),
+                            new AutoTypeColumnSchema("list_json", null, AutoTypeColumnSchema.VERSION_1),
+                            new AutoTypeColumnSchema("nonexistent", null, AutoTypeColumnSchema.VERSION_1)
                         )
                     )
                     .build();

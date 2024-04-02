@@ -24,6 +24,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.druid.common.config.NullHandling;
 import org.apache.druid.java.util.common.io.smoosh.SmooshedFileMapper;
+import org.apache.druid.segment.AutoTypeColumnSchema;
 import org.apache.druid.segment.column.ColumnBuilder;
 import org.apache.druid.segment.column.ColumnCapabilitiesImpl;
 import org.apache.druid.segment.column.ColumnConfig;
@@ -205,7 +206,9 @@ public class NestedCommonFormatColumnPartSerde implements ColumnPartSerde
       builder.setType(logicalType);
       builder.setNestedCommonFormatColumnSupplier(supplier);
       builder.setIndexSupplier(supplier, true, false);
-      builder.setColumnFormat(new NestedCommonFormatColumn.Format(logicalType, capabilitiesBuilder.hasNulls().isTrue(), enforceLogicalType));
+      builder.setColumnFormat(new NestedCommonFormatColumn.Format(logicalType, capabilitiesBuilder.hasNulls().isTrue(), enforceLogicalType,
+                                                                  AutoTypeColumnSchema.VERSION_1
+      ));
     }
   }
 
@@ -227,7 +230,8 @@ public class NestedCommonFormatColumnPartSerde implements ColumnPartSerde
       builder.setType(logicalType);
       builder.setNestedCommonFormatColumnSupplier(supplier);
       builder.setIndexSupplier(supplier, true, false);
-      builder.setColumnFormat(new NestedCommonFormatColumn.Format(logicalType, capabilitiesBuilder.hasNulls().isTrue(), enforceLogicalType));
+      builder.setColumnFormat(new NestedCommonFormatColumn.Format(logicalType, capabilitiesBuilder.hasNulls().isTrue(), enforceLogicalType,
+                                                                  AutoTypeColumnSchema.VERSION_1));
     }
   }
 
@@ -249,7 +253,8 @@ public class NestedCommonFormatColumnPartSerde implements ColumnPartSerde
       builder.setType(logicalType);
       builder.setNestedCommonFormatColumnSupplier(supplier);
       builder.setIndexSupplier(supplier, true, false);
-      builder.setColumnFormat(new NestedCommonFormatColumn.Format(logicalType, capabilitiesBuilder.hasNulls().isTrue(), enforceLogicalType));
+      builder.setColumnFormat(new NestedCommonFormatColumn.Format(logicalType, capabilitiesBuilder.hasNulls().isTrue(), enforceLogicalType,
+                                                                  AutoTypeColumnSchema.VERSION_1));
     }
   }
 
@@ -280,7 +285,8 @@ public class NestedCommonFormatColumnPartSerde implements ColumnPartSerde
       builder.setColumnFormat(new NestedCommonFormatColumn.Format(
           logicalType,
           capabilitiesBuilder.hasNulls().isTrue(),
-          enforceLogicalType
+          enforceLogicalType,
+          AutoTypeColumnSchema.VERSION_1
       ));
     }
   }
@@ -315,7 +321,12 @@ public class NestedCommonFormatColumnPartSerde implements ColumnPartSerde
       if (NullHandling.sqlCompatible() && hasNulls) {
         builder.setIndexSupplier(supplier, false, false);
       }
-      builder.setColumnFormat(new NestedCommonFormatColumn.Format(logicalType, hasNulls, enforceLogicalType));
+      builder.setColumnFormat(new NestedCommonFormatColumn.Format(
+          logicalType,
+          hasNulls,
+          enforceLogicalType,
+          supplier.getVersion() == 0 ? AutoTypeColumnSchema.VERSION_1 : AutoTypeColumnSchema.VERSION_2
+      ));
     }
   }
 

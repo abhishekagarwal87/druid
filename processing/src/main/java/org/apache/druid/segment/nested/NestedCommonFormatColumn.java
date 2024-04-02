@@ -72,7 +72,6 @@ public interface NestedCommonFormatColumn extends BaseColumn
     return Indexed.empty();
   }
 
-
   default SortedMap<String, FieldTypeInfo.MutableTypeSet> getFieldTypeInfo()
   {
     SortedMap<String, FieldTypeInfo.MutableTypeSet> fields = new TreeMap<>();
@@ -90,12 +89,14 @@ public interface NestedCommonFormatColumn extends BaseColumn
     private final ColumnType logicalType;
     private final boolean hasNulls;
     private final boolean enforceLogicalType;
+    private final int version;
 
-    public Format(ColumnType logicalType, boolean hasNulls, boolean enforceLogicalType)
+    public Format(ColumnType logicalType, boolean hasNulls, boolean enforceLogicalType, int version)
     {
       this.logicalType = logicalType;
       this.hasNulls = hasNulls;
       this.enforceLogicalType = enforceLogicalType;
+      this.version = version;
     }
 
     @Override
@@ -107,13 +108,13 @@ public interface NestedCommonFormatColumn extends BaseColumn
     @Override
     public DimensionHandler getColumnHandler(String columnName)
     {
-      return new NestedCommonFormatColumnHandler(columnName, enforceLogicalType ? logicalType : null);
+      return new NestedCommonFormatColumnHandler(columnName, enforceLogicalType ? logicalType : null, version);
     }
 
     @Override
     public DimensionSchema getColumnSchema(String columnName)
     {
-      return new AutoTypeColumnSchema(columnName, enforceLogicalType ? logicalType : null);
+      return new AutoTypeColumnSchema(columnName, enforceLogicalType ? logicalType : null, version);
     }
 
     @Override
@@ -125,10 +126,13 @@ public interface NestedCommonFormatColumn extends BaseColumn
 
       if (otherFormat instanceof Format) {
         final Format other = (Format) otherFormat;
-        if (!getLogicalType().equals(other.getLogicalType())) {
-          return new Format(ColumnType.NESTED_DATA, hasNulls || other.hasNulls, false);
+        if (version != other.version) {
+          throw new ISE("Cannot merge columns of different versions[%s] and [%s]", version, other.version);
         }
-        return new Format(logicalType, hasNulls || other.hasNulls, enforceLogicalType || other.enforceLogicalType);
+        if (!getLogicalType().equals(other.getLogicalType())) {
+          return new Format(ColumnType.NESTED_DATA, hasNulls || other.hasNulls, false, version);
+        }
+        return new Format(logicalType, hasNulls || other.hasNulls, enforceLogicalType || other.enforceLogicalType, version);
       }
       throw new ISE(
           "Cannot merge columns of type[%s] and format[%s] and with [%s] and [%s]",
