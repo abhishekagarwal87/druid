@@ -35,43 +35,26 @@ import java.util.function.Function;
  */
 public class PersonaBasedErrorTransformStrategy implements ErrorResponseTransformStrategy
 {
-  private static final String ERROR_WITH_ID_TEMPLATE = "Could not process the query, please contact your administrator "
+  private static final String ERROR_WITH_ID_TEMPLATE = "Internal server error, please contact your administrator "
                                                        + "with Error ID [%s] if the issue persists.";
   private static final EmittingLogger LOG = new EmittingLogger(PersonaBasedErrorTransformStrategy.class);
 
   public static final PersonaBasedErrorTransformStrategy INSTANCE = new PersonaBasedErrorTransformStrategy();
 
   @Override
-  public Exception transformIfNeeded(DruidException druidException)
-  {
-    String errorId = UUID.randomUUID().toString();
-    Optional<Exception> maybeMaskedException = maybeTransform(druidException, errorId);
-
-    if (maybeMaskedException.isEmpty()) {
-      return druidException;
-    } else {
-      LOG.makeAlert(druidException, StringUtils.format("Error ID: [%s]", errorId))
-         .addData(druidException.getContext())
-         .severity(AlertEvent.Severity.ANOMALY)
-         .emit();
-      return maybeMaskedException.get();
-    }
-  }
-
-  /**
-   * Transforms the {@link DruidException} if required. Returns an optional with a new Druid exception if the
-   * exception was modified. Returns an empty optional if no transformation was performed.
-   */
-  private Optional<Exception> maybeTransform(DruidException druidException, String errorId)
+  public Optional<Exception> maybeTransform(DruidException druidException, Optional<String> optionalErrorId)
   {
     if (druidException.getTargetPersona() == DruidException.Persona.USER) {
       return Optional.empty();
-    } else {
-      return Optional.of(DruidException.forPersona(DruidException.Persona.USER)
-                                       .ofCategory(druidException.getCategory())
-                                       .withErrorCode(druidException.getErrorCode())
-                                       .build(StringUtils.format(ERROR_WITH_ID_TEMPLATE, errorId)));
     }
+    String errorId = optionalErrorId.orElse(UUID.randomUUID().toString());
+    LOG.makeAlert(druidException, StringUtils.format("External Error ID: [%s]", errorId))
+       .addData(druidException.getContext())
+       .severity(AlertEvent.Severity.ANOMALY)
+       .emit();
+     return Optional.of(DruidException.forPersona(DruidException.Persona.USER)
+                                       .ofCategory(DruidException.Category.RUNTIME_FAILURE)
+                                       .build(StringUtils.format(ERROR_WITH_ID_TEMPLATE, errorId)));
   }
 
   @Override
